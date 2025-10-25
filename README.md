@@ -32,3 +32,4 @@ Chat completion endpoint: [http://localhost:5050/v1/chat/completions](localhost:
 
 ## Test the Server
 
+Run the `base.py`
