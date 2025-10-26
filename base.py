@@ -11,8 +11,6 @@ response = client.chat.completions.create(
     messages=[
         {"role": "user", "content": "What is a butterfly?"}
     ],
-    temperature=0.7,
-    max_tokens=512
 )
 
 print(response.choices[0].message.content)
