@@ -1,17 +1,75 @@
+"""
+LLaMA Server Parallelism Load Test
+===================================
+This test verifies TRUE parallelism - checking that ALL concurrent requests
+receive valid LLM-generated responses simultaneously, not just that requests overlap.
+
+Usage:
+    locust -f LOCUST_llama-server_docker_inf.py --headless -u 8 -r 2 -t 60s --host http://localhost:8080
+
+
+Key Metrics Tested:
+1. All requests receive valid LLM-generated content
+2. Requests are processed simultaneously (overlapping time windows)
+3. Response quality is consistent across parallel requests
+4. No request starvation (all requests complete successfully)
+"""
+
 from locust import HttpUser, task, between, events
 import time
 from threading import Lock
-import requests
-from collections import defaultdict
 import statistics
+from collections import defaultdict
+import json
+import hashlib
 
-# Metrics tracking
-response_times = {"8080": [], "8081": []}
-concurrent_requests = {"8080": 0, "8081": 0}
-locks = {"8080": Lock(), "8081": Lock()}
-request_timestamps = {"8080": [], "8081": []}
 
+# ============================================================================
+# METRICS TRACKING
+# ============================================================================
+class ParallelismMetrics:
+    """Thread-safe metrics collector for parallelism testing"""
+    
+    def __init__(self):
+        self.lock = Lock()
+        self.requests = []  # All request data
+        self.concurrent_count = 0  # Current concurrent requests
+        self.peak_concurrent = 0  # Peak concurrent requests observed
+        self.failed_requests = []  # Failed request details
+        self.empty_responses = []  # Requests with empty/no LLM output
+        
+    def start_request(self):
+        with self.lock:
+            self.concurrent_count += 1
+            current = self.concurrent_count
+            self.peak_concurrent = max(self.peak_concurrent, current)
+            return current
+    
+    def end_request(self):
+        with self.lock:
+            self.concurrent_count -= 1
+    
+    def record_success(self, data):
+        with self.lock:
+            self.requests.append(data)
+    
+    def record_failure(self, data):
+        with self.lock:
+            self.failed_requests.append(data)
+    
+    def record_empty_response(self, data):
+        with self.lock:
+            self.empty_responses.append(data)
+
+
+metrics = ParallelismMetrics()
+
+
+# ============================================================================
+# PROMPT BUILDER
+# ============================================================================
 def build_prompt(context, questions, conversation_turns):
+    """Build Gemma-formatted prompt"""
     prompt = """<start_of_turn>user
 You are a polite Bangla phone survey agent. ALWAYS respond in Bangla.
 ONLY ask the questions from the Question List one by one, exactly as written, in order.
@@ -34,6 +92,10 @@ Question List:
     
     return prompt
 
+
+# ============================================================================
+# TEST DATA
+# ============================================================================
 SURVEY_CONTEXT = "বাংলাদেশে FrozenBerry কিনতে পারবেন Foodpanda, Daraz, Unimart, Shawpno এর মতো অনলাইন শপ ও সুপারশপ থেকে।"
 
 QUESTION_LIST = [
@@ -49,30 +111,36 @@ CONVERSATION_TURNS = [
     {"role": "user", "content": "হ্যাঁ, ব্যবহার করেছি।"},
 ]
 
-PROMPT = build_prompt(
-    SURVEY_CONTEXT,
-    QUESTION_LIST,
-    CONVERSATION_TURNS
-)
+PROMPT = build_prompt(SURVEY_CONTEXT, QUESTION_LIST, CONVERSATION_TURNS)
 
 PAYLOAD = {
     "model": "gemma3_1b_400S_p77s16v20-Q8_0",
     "prompt": PROMPT,
-    "max_tokens": 512,
+    "max_tokens": 256,
     "stream": False
 }
 
-class LLMUser(HttpUser):
-    host = "http://localhost:8080"
-    wait_time = between(0, 0.1)
 
-    @task(1)
-    def hit_8080(self):
-        endpoint = "8080"
-        with locks[endpoint]:
-            concurrent_requests[endpoint] += 1
-            current_concurrent = concurrent_requests[endpoint]
+# ============================================================================
+# LOCUST USER
+# ============================================================================
+class LLMUser(HttpUser):
+    """
+    Load test user that verifies TRUE parallelism:
+    - Each request must receive valid LLM-generated content
+    - Requests should be processed simultaneously
+    """
+    host = "http://localhost:8080"
+    wait_time = between(0, 0.1)  # Minimal wait to maximize concurrency
+
+    @task
+    def inference_request(self):
+        """Send inference request and verify LLM generation"""
         
+        # Track concurrency
+        concurrent_at_start = metrics.start_request()
+        
+        request_id = hashlib.md5(f"{time.time()}-{id(self)}".encode()).hexdigest()[:8]
         start_time = time.time()
         
         try:
@@ -80,257 +148,368 @@ class LLMUser(HttpUser):
                 "/v1/completions",
                 json=PAYLOAD,
                 headers={"Authorization": "Bearer sk-no-key-required"},
-                name="endpoint_8080",
-                timeout=60
+                name="llm_completion",
+                timeout=120
             )
             
-            elapsed = time.time() - start_time
+            end_time = time.time()
+            elapsed = end_time - start_time
             
-            with locks[endpoint]:
-                response_times[endpoint].append({
-                    "time": elapsed,
-                    "concurrent": current_concurrent,
-                    "timestamp": start_time,
-                    "end_time": time.time()
-                })
-                request_timestamps[endpoint].append((start_time, time.time()))
+            # Parse and validate response
+            success = False
+            generated_text = ""
+            token_count = 0
+            slot_id = None
+            
+            if response.status_code == 200:
+                try:
+                    resp_json = response.json()
+                    
+                    # Extract generated text
+                    if "choices" in resp_json and len(resp_json["choices"]) > 0:
+                        choice = resp_json["choices"][0]
+                        generated_text = choice.get("text", "")
+                        
+                        # Get token count if available
+                        if "usage" in resp_json:
+                            token_count = resp_json["usage"].get("completion_tokens", 0)
+                    
+                    # Check if we got actual LLM output
+                    if generated_text and len(generated_text.strip()) > 5:
+                        success = True
+                    else:
+                        # Empty or trivial response - LLM didn't actually generate
+                        metrics.record_empty_response({
+                            "request_id": request_id,
+                            "timestamp": start_time,
+                            "concurrent_at_start": concurrent_at_start,
+                            "response_text": generated_text[:100] if generated_text else "(empty)",
+                            "elapsed": elapsed
+                        })
+                        
+                except Exception as e:
+                    pass
+            
+            # Record metrics
+            request_data = {
+                "request_id": request_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "elapsed": elapsed,
+                "concurrent_at_start": concurrent_at_start,
+                "success": success,
+                "generated_text": generated_text[:200] if generated_text else "",
+                "text_length": len(generated_text) if generated_text else 0,
+                "token_count": token_count,
+                "status_code": response.status_code
+            }
+            
+            if success:
+                metrics.record_success(request_data)
+            else:
+                metrics.record_failure(request_data)
                 
         except Exception as e:
-            print(f"Error on 8080: {e}")
+            end_time = time.time()
+            metrics.record_failure({
+                "request_id": request_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "elapsed": end_time - start_time,
+                "concurrent_at_start": concurrent_at_start,
+                "success": False,
+                "error": str(e),
+                "status_code": 0
+            })
+            print(f"Request {request_id} failed: {e}")
+            
         finally:
-            with locks[endpoint]:
-                concurrent_requests[endpoint] -= 1
+            metrics.end_request()
 
-    @task(1)
-    def hit_8081(self):
-        endpoint = "8081"
-        with locks[endpoint]:
-            concurrent_requests[endpoint] += 1
-            current_concurrent = concurrent_requests[endpoint]
-        
-        start_time = time.time()
-        
-        try:
-            request_start = time.time()
+
+# ============================================================================
+# ANALYSIS FUNCTIONS
+# ============================================================================
+def find_overlapping_requests(requests):
+    """
+    Find all requests that were genuinely running in parallel.
+    Two requests overlap if request A started before request B ended AND
+    request B started before request A ended.
+    """
+    overlapping_pairs = []
+    
+    for i, req1 in enumerate(requests):
+        for j, req2 in enumerate(requests):
+            if i >= j:
+                continue
             
-            try:
-                response = requests.post(
-                    "http://localhost:8081/v1/completions",
-                    json=PAYLOAD,
-                    headers={"Authorization": "Bearer sk-no-key-required"},
-                    timeout=60
-                )
-                response_time = (time.time() - request_start) * 1000
+            # Check temporal overlap
+            start1, end1 = req1["start_time"], req1["end_time"]
+            start2, end2 = req2["start_time"], req2["end_time"]
+            
+            if start1 < end2 and start2 < end1:
+                overlap_start = max(start1, start2)
+                overlap_end = min(end1, end2)
+                overlap_duration = overlap_end - overlap_start
                 
-                events.request.fire(
-                    request_type="POST",
-                    name="endpoint_8081",
-                    response_time=response_time,
-                    response_length=len(response.content),
-                    exception=None,
-                    context={}
-                )
-                
-            except Exception as e:
-                response_time = (time.time() - request_start) * 1000
-                events.request.fire(
-                    request_type="POST",
-                    name="endpoint_8081",
-                    response_time=response_time,
-                    response_length=0,
-                    exception=e,
-                    context={}
-                )
-                print(f"Error on 8081: {e}")
-            
-            elapsed = time.time() - start_time
-            
-            with locks[endpoint]:
-                response_times[endpoint].append({
-                    "time": elapsed,
-                    "concurrent": current_concurrent,
-                    "timestamp": start_time,
-                    "end_time": time.time()
+                overlapping_pairs.append({
+                    "req1_id": req1["request_id"],
+                    "req2_id": req2["request_id"],
+                    "overlap_duration": overlap_duration,
+                    "both_successful": req1["success"] and req2["success"]
                 })
-                request_timestamps[endpoint].append((start_time, time.time()))
-                
-        finally:
-            with locks[endpoint]:
-                concurrent_requests[endpoint] -= 1
+    
+    return overlapping_pairs
 
 
-def calculate_overlap_percentage(timestamps_8080, timestamps_8081):
-    """Calculate what percentage of time both endpoints were processing simultaneously"""
-    if not timestamps_8080 or not timestamps_8081:
+def calculate_parallelism_score(requests):
+    """
+    Calculate what percentage of the test time had multiple requests running.
+    Higher score = more parallelism.
+    """
+    if len(requests) < 2:
         return 0.0
     
-    overlapping_time = 0.0
+    # Create timeline of events
+    events_list = []
+    for req in requests:
+        events_list.append((req["start_time"], "start"))
+        events_list.append((req["end_time"], "end"))
     
-    for start1, end1 in timestamps_8080:
-        for start2, end2 in timestamps_8081:
-            # Calculate overlap
-            overlap_start = max(start1, start2)
-            overlap_end = min(end1, end2)
-            
-            if overlap_start < overlap_end:
-                overlapping_time += (overlap_end - overlap_start)
+    events_list.sort(key=lambda x: x[0])
     
-    # Total time both endpoints were active
-    total_8080 = sum(end - start for start, end in timestamps_8080)
-    total_8081 = sum(end - start for start, end in timestamps_8081)
+    total_time = 0.0
+    parallel_time = 0.0
+    active_count = 0
+    last_time = events_list[0][0]
     
-    # Average of both endpoints' total time
-    avg_total_time = (total_8080 + total_8081) / 2
+    for event_time, event_type in events_list:
+        duration = event_time - last_time
+        total_time += duration
+        
+        if active_count >= 2:
+            parallel_time += duration
+        
+        if event_type == "start":
+            active_count += 1
+        else:
+            active_count -= 1
+        
+        last_time = event_time
     
-    if avg_total_time == 0:
-        return 0.0
-    
-    return (overlapping_time / avg_total_time) * 100
+    return (parallel_time / total_time * 100) if total_time > 0 else 0.0
 
 
+def verify_all_requests_generated(requests):
+    """
+    The KEY test: Did ALL requests actually get LLM-generated responses?
+    Returns (fully_successful, partial, failed) counts.
+    """
+    fully_successful = 0  # Got valid LLM output
+    partial = 0  # Request completed but with issues
+    failed = 0  # Request failed or got no output
+    
+    for req in requests:
+        if req["success"] and req["text_length"] > 20:
+            fully_successful += 1
+        elif req.get("status_code") == 200:
+            partial += 1
+        else:
+            failed += 1
+    
+    return fully_successful, partial, failed
+
+
+# ============================================================================
+# TEST COMPLETION REPORT
+# ============================================================================
 @events.test_stop.add_listener
 def on_test_stop(environment, **kwargs):
-    """Comprehensive analysis when test stops"""
+    """Comprehensive parallelism analysis when test stops"""
+    
+    all_requests = metrics.requests + metrics.failed_requests
+    successful_requests = metrics.requests
+    
     print("\n" + "="*100)
-    print(" " * 35 + "PARALLELISM TEST RESULTS")
+    print(" " * 20 + "🔬 TRUE PARALLELISM VERIFICATION REPORT 🔬")
     print("="*100)
     
-    # Basic statistics
-    print("\n📊 BASIC STATISTICS")
+    # -------------------------------------------------------------------------
+    # Section 1: Request Summary
+    # -------------------------------------------------------------------------
+    print("\n📊 REQUEST SUMMARY")
     print("-" * 100)
     
-    for endpoint in ["8080", "8081"]:
-        times = response_times[endpoint]
-        if times:
-            response_time_values = [t["time"] for t in times]
-            avg_time = statistics.mean(response_time_values)
-            median_time = statistics.median(response_time_values)
-            max_concurrent = max(t["concurrent"] for t in times)
+    total_requests = len(all_requests)
+    successful = len([r for r in all_requests if r["success"]])
+    failed = len([r for r in all_requests if not r["success"]])
+    
+    print(f"\n   Total requests made:         {total_requests}")
+    print(f"   ✅ Successful (got LLM output): {successful}")
+    print(f"   ❌ Failed/Empty response:       {failed}")
+    print(f"   ⚠️  Empty response warnings:     {len(metrics.empty_responses)}")
+    print(f"   Peak concurrent requests:    {metrics.peak_concurrent}")
+    
+    success_rate = (successful / total_requests * 100) if total_requests > 0 else 0
+    print(f"\n   Success rate: {success_rate:.1f}%")
+    
+    # -------------------------------------------------------------------------
+    # Section 2: Response Time Analysis
+    # -------------------------------------------------------------------------
+    if successful_requests:
+        print("\n\n⏱️  RESPONSE TIME ANALYSIS")
+        print("-" * 100)
+        
+        response_times = [r["elapsed"] for r in successful_requests]
+        
+        print(f"\n   Average response time:    {statistics.mean(response_times):.3f}s")
+        print(f"   Median response time:     {statistics.median(response_times):.3f}s")
+        print(f"   Min response time:        {min(response_times):.3f}s")
+        print(f"   Max response time:        {max(response_times):.3f}s")
+        if len(response_times) > 1:
+            print(f"   Std deviation:            {statistics.stdev(response_times):.3f}s")
+        
+        # Check for response time consistency (important for parallelism)
+        if len(response_times) > 1:
+            cv = statistics.stdev(response_times) / statistics.mean(response_times)
+            consistency = "CONSISTENT" if cv < 0.3 else "VARIABLE" if cv < 0.6 else "HIGHLY VARIABLE"
+            print(f"\n   Response time consistency: {consistency} (CV: {cv:.2f})")
+    
+    # -------------------------------------------------------------------------
+    # Section 3: TRUE Parallelism Verification
+    # -------------------------------------------------------------------------
+    print("\n\n🔄 TRUE PARALLELISM VERIFICATION")
+    print("-" * 100)
+    
+    if len(all_requests) < 2:
+        print("\n   ⚠️  Not enough requests to verify parallelism")
+    else:
+        overlapping_pairs = find_overlapping_requests(all_requests)
+        parallelism_score = calculate_parallelism_score(all_requests)
+        
+        # Count pairs where BOTH requests got valid LLM output
+        both_successful_pairs = [p for p in overlapping_pairs if p["both_successful"]]
+        
+        print(f"\n   Overlapping request pairs found: {len(overlapping_pairs)}")
+        print(f"   Pairs where BOTH got LLM output: {len(both_successful_pairs)}")
+        print(f"   Parallelism score:               {parallelism_score:.1f}%")
+        
+        if both_successful_pairs:
+            avg_overlap = statistics.mean([p["overlap_duration"] for p in both_successful_pairs])
+            print(f"   Average overlap duration:        {avg_overlap:.3f}s")
+    
+    # -------------------------------------------------------------------------
+    # Section 4: The KEY Test - All Requests Generated
+    # -------------------------------------------------------------------------
+    print("\n\n🎯 KEY TEST: DID ALL REQUESTS GET LLM GENERATION?")
+    print("-" * 100)
+    
+    fully_gen, partial, failed_gen = verify_all_requests_generated(all_requests)
+    
+    print(f"\n   ✅ Fully generated (>20 chars):  {fully_gen}")
+    print(f"   ⚠️  Partial/short response:       {partial}")
+    print(f"   ❌ Failed/no generation:          {failed_gen}")
+    
+    if fully_gen == total_requests:
+        print(f"\n   ✓ ALL {total_requests} REQUESTS GOT VALID LLM OUTPUT!")
+    elif fully_gen > 0:
+        print(f"\n   ⚠ Only {fully_gen}/{total_requests} requests got valid LLM output")
+    else:
+        print(f"\n   ✗ NO REQUESTS got valid LLM output!")
+    
+    # -------------------------------------------------------------------------
+    # Section 5: Sample Outputs (proof of generation)
+    # -------------------------------------------------------------------------
+    print("\n\n📝 SAMPLE GENERATED OUTPUTS (Proof of LLM Generation)")
+    print("-" * 100)
+    
+    sample_count = min(5, len(successful_requests))
+    for i, req in enumerate(successful_requests[:sample_count]):
+        print(f"\n   Request {req['request_id']}:")
+        print(f"   Time: {req['elapsed']:.3f}s | Concurrent at start: {req['concurrent_at_start']}")
+        print(f"   Output preview: {req['generated_text'][:80]}...")
+    
+    # -------------------------------------------------------------------------
+    # Section 6: Throughput Analysis
+    # -------------------------------------------------------------------------
+    if all_requests:
+        print("\n\n⚡ THROUGHPUT ANALYSIS")
+        print("-" * 100)
+        
+        test_start = min(r["start_time"] for r in all_requests)
+        test_end = max(r["end_time"] for r in all_requests)
+        test_duration = test_end - test_start
+        
+        total_processing_time = sum(r["elapsed"] for r in successful_requests)
+        
+        print(f"\n   Test wall-clock duration:    {test_duration:.2f}s")
+        print(f"   Total processing time:       {total_processing_time:.2f}s")
+        print(f"   Requests completed:          {successful}")
+        
+        if test_duration > 0:
+            throughput = successful / test_duration
+            print(f"   Throughput:                  {throughput:.2f} req/s")
             
-            print(f"\n🔹 Endpoint {endpoint}:")
-            print(f"   Total requests:          {len(times)}")
-            print(f"   Average response time:   {avg_time:.3f}s")
-            print(f"   Median response time:    {median_time:.3f}s")
-            print(f"   Min response time:       {min(response_time_values):.3f}s")
-            print(f"   Max response time:       {max(response_time_values):.3f}s")
-            print(f"   Std deviation:           {statistics.stdev(response_time_values) if len(response_time_values) > 1 else 0:.3f}s")
-            print(f"   Max concurrent requests: {max_concurrent}")
+            # Calculate speedup vs sequential
+            speedup = total_processing_time / test_duration if test_duration > 0 else 1
+            print(f"\n   Parallelism speedup:         {speedup:.2f}x faster than sequential")
     
-    # Overlap analysis
-    print("\n\n🔄 OVERLAP ANALYSIS")
-    print("-" * 100)
+    # -------------------------------------------------------------------------
+    # Section 7: Final Verdict
+    # -------------------------------------------------------------------------
+    print("\n\n" + "="*100)
+    print(" " * 35 + "🏆 FINAL VERDICT 🏆")
+    print("="*100)
     
-    all_requests = []
-    for endpoint in ["8080", "8081"]:
-        for req in response_times[endpoint]:
-            all_requests.append({
-                "endpoint": endpoint,
-                "start": req["timestamp"],
-                "end": req["end_time"],
-                "duration": req["time"]
-            })
+    # Calculate overall parallelism quality
+    issues = []
     
-    all_requests.sort(key=lambda x: x["start"])
+    if metrics.peak_concurrent < 2:
+        issues.append("Peak concurrency never exceeded 1 (no parallel requests)")
     
-    overlaps = 0
-    overlap_durations = []
+    if len(both_successful_pairs) == 0 and len(all_requests) >= 2:
+        issues.append("No overlapping requests both received valid LLM output")
     
-    for i in range(len(all_requests)):
-        for j in range(i + 1, len(all_requests)):
-            req1, req2 = all_requests[i], all_requests[j]
-            if req1["endpoint"] != req2["endpoint"]:
-                # Check if they overlap
-                overlap_start = max(req1["start"], req2["start"])
-                overlap_end = min(req1["end"], req2["end"])
-                
-                if overlap_start < overlap_end:
-                    overlaps += 1
-                    overlap_duration = overlap_end - overlap_start
-                    overlap_durations.append(overlap_duration)
+    if success_rate < 90:
+        issues.append(f"Low success rate: {success_rate:.1f}%")
     
-    overlap_percentage = calculate_overlap_percentage(
-        request_timestamps["8080"],
-        request_timestamps["8081"]
-    )
+    if len(metrics.empty_responses) > 0:
+        issues.append(f"{len(metrics.empty_responses)} requests got empty/invalid responses")
     
-    print(f"\n   Cross-endpoint overlapping request pairs: {overlaps}")
-    if overlap_durations:
-        print(f"   Average overlap duration:                 {statistics.mean(overlap_durations):.3f}s")
-        print(f"   Total overlapping time:                   {sum(overlap_durations):.3f}s")
-        print(f"   Overlap percentage:                       {overlap_percentage:.1f}%")
-    
-    # Performance comparison
-    print("\n\n⚡ PERFORMANCE COMPARISON")
-    print("-" * 100)
-    
-    if response_times["8080"] and response_times["8081"]:
-        avg_8080 = statistics.mean([t["time"] for t in response_times["8080"]])
-        avg_8081 = statistics.mean([t["time"] for t in response_times["8081"]])
+    if not issues:
+        parallelism_score = calculate_parallelism_score(all_requests) if len(all_requests) >= 2 else 0
         
-        diff_percentage = abs(avg_8080 - avg_8081) / min(avg_8080, avg_8081) * 100
-        
-        print(f"\n   Average response time difference:  {abs(avg_8080 - avg_8081):.3f}s ({diff_percentage:.1f}%)")
-        
-        if diff_percentage < 10:
-            print(f"   ✓ Both endpoints have similar performance (< 10% difference)")
+        if parallelism_score >= 50 and fully_gen == total_requests:
+            print("\n   ✅ TRUE PARALLEL PROCESSING CONFIRMED!")
+            print("   All concurrent requests received valid LLM-generated responses.")
+            print("   The server is correctly handling parallel inference.")
+        elif parallelism_score >= 20:
+            print("\n   ⚠️  PARTIAL PARALLELISM DETECTED")
+            print("   Some parallel processing occurred, but not at full capacity.")
+            print("   Consider sending more concurrent requests or checking --parallel setting.")
         else:
-            slower = "8080" if avg_8080 > avg_8081 else "8081"
-            print(f"   ⚠ Endpoint {slower} is significantly slower")
-    
-    # Final verdict
-    print("\n\n🎯 FINAL VERDICT")
-    print("-" * 100)
-    
-    print("\n   Parallelism Indicators:")
-    
-    # Indicator 1: Overlaps
-    if overlaps > 0:
-        print(f"   ✓ Overlapping requests detected: {overlaps} pairs")
-        overlap_score = "HIGH" if overlaps > 10 else "MEDIUM" if overlaps > 3 else "LOW"
-        print(f"     Overlap score: {overlap_score}")
+            print("\n   ⚠️  LIMITED PARALLELISM")
+            print("   Requests were processed mostly sequentially.")
+            print("   Check if LLAMA_ARG_N_PARALLEL is set correctly in your config.")
     else:
-        print(f"   ✗ No overlapping requests detected")
+        print("\n   ❌ PARALLELISM ISSUES DETECTED:")
+        for issue in issues:
+            print(f"      • {issue}")
+        print("\n   Recommendations:")
+        print("      • Ensure LLAMA_ARG_N_PARALLEL=4 or higher in compose.yaml")
+        print("      • Check server logs for errors")
+        print("      • Increase concurrent users: locust -u 8 or higher")
     
-    # Indicator 2: Overlap percentage
-    if overlap_percentage > 20:
-        print(f"   ✓ High overlap percentage: {overlap_percentage:.1f}%")
-    elif overlap_percentage > 5:
-        print(f"   ~ Moderate overlap percentage: {overlap_percentage:.1f}%")
-    else:
-        print(f"   ✗ Low overlap percentage: {overlap_percentage:.1f}%")
-    
-    # Indicator 3: Performance similarity
-    if response_times["8080"] and response_times["8081"]:
-        avg_8080 = statistics.mean([t["time"] for t in response_times["8080"]])
-        avg_8081 = statistics.mean([t["time"] for t in response_times["8081"]])
-        diff_percentage = abs(avg_8080 - avg_8081) / min(avg_8080, avg_8081) * 100
-        
-        if diff_percentage < 15:
-            print(f"   ✓ Similar performance between endpoints: {diff_percentage:.1f}% difference")
-        else:
-            print(f"   ⚠ Significant performance difference: {diff_percentage:.1f}%")
-    
-    # Overall conclusion
-    print("\n   " + "="*96)
-    
-    if overlaps > 5 and overlap_percentage > 10:
-        print("   ✅ CONCLUSION: Endpoints ARE running in TRUE PARALLEL")
-        print("   Both endpoints process requests simultaneously without blocking each other.")
-    elif overlaps > 0:
-        print("   ⚠️  CONCLUSION: Endpoints have PARTIAL PARALLELISM")
-        print("   Some parallel execution detected, but may have resource contention.")
-    else:
-        print("   ❌ CONCLUSION: Endpoints are NOT running in parallel")
-        print("   Requests appear to be processed sequentially (one blocks the other).")
-    
-    print("   " + "="*96)
-    print("\n" + "="*100 + "\n")
+    print("\n" + "="*100)
+    print("\n💡 Run command: locust -f LOCUST_llama-server_docker_inf.py --headless -u 8 -r 2 -t 60s")
+    print("="*100 + "\n")
 
 
-# Optional: Real-time monitoring during the test
+# Optional: Real-time progress updates
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    """Optional: Print requests in real-time to see parallelism live"""
-    # Uncomment below to see real-time request logs
-    # print(f"[{time.strftime('%H:%M:%S')}] {name}: {response_time:.0f}ms")
+    """Real-time request logging (disabled by default)"""
+    # Uncomment for real-time visibility:
+    # status = "✓" if not exception else "✗"
+    # print(f"[{time.strftime('%H:%M:%S')}] {status} {name}: {response_time:.0f}ms")
     pass

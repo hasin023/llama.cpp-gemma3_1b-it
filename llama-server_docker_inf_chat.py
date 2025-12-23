@@ -2,7 +2,7 @@ import time
 from openai import OpenAI
 
 # Config
-ENDPOINTS = ["http://localhost:8080/v1", "http://localhost:8081/v1"]
+ENDPOINTS = ["http://localhost:8080/v1"]
 API_KEY = "sk-no-key-required"
 
 def run_chat_inference(endpoint, context, questions, conversation_history):

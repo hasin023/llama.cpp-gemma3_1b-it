@@ -75,3 +75,62 @@ llm-server params ->
 
 - `-np, --parallel N` number of server slots (default: -1, -1 = auto) (env: LLAMA_ARG_N_PARALLEL)
 - `-cb, --cont-batching, -nocb, --no-cont-batching` whether to enable continuous batching (a.k.a dynamic batching) (default: enabled) (env: LLAMA_ARG_CONT_BATCHING)
+
+---
+
+```bash
+cpus: N # Docker's hard limit on CPU usage
+LLAMA_ARG_THREADS=N # Threads for token generation, During inference (outputting tokens)
+LLAMA_ARG_THREADS_BATCH=N # Threads for prompt processing, When processing the input prompt
+LLAMA_ARG_N_PARALLEL=N # How many slots the server has for concurrent requests
+```
+
+# On the Orange Pi
+
+```bash
+nproc --all
+```
+
+### Recommended Configuration
+
+| Orange Pi Cores | cpus        | LLAMA_ARG_THREADS | LLAMA_ARG_N_PARALLEL |
+| :-------------- | :---------- | :---------------- | :------------------- |
+| 2 cores         | 2 (or omit) | 2                 | 2-4                  |
+| 4 cores         | 4 (or omit) | 4                 | 4-6                  |
+| 8 cores         | 6-8         | 6-8               | 4-8                  |
+
+For a typical **4-core Orange Pi**, I recommend:
+
+```yaml
+services:
+  llm-server:
+    # ... other config ...
+    environment:
+      - LLAMA_ARG_THREADS=4 # Use all cores for inference
+      - LLAMA_ARG_THREADS_BATCH=4 # Use all cores for prompt processing
+      - LLAMA_ARG_N_PARALLEL=4 # 4 concurrent slots
+    deploy:
+      resources:
+        limits:
+          cpus: "4" # Allow container to use all 4 cores
+```
+
+For a **2-core device**:
+
+```yaml
+environment:
+  - LLAMA_ARG_THREADS=2
+  - LLAMA_ARG_THREADS_BATCH=2
+  - LLAMA_ARG_N_PARALLEL=2 # Reduce slots to match
+deploy:
+  resources:
+    limits:
+      cpus: "2"
+```
+
+- Find Orange PI IP - `hostname -I`
+
+```python
+# Change this on your laptop/client
+ENDPOINTS = ["http://192.168.1.50:8080/v1"]
+```

@@ -1,8 +1,8 @@
 import time
 from openai import OpenAI
 
-# Config
-ENDPOINTS = ["http://localhost:8080/v1", "http://localhost:8081/v1"]
+# Config - Single server with parallel slots handles all requests
+ENDPOINTS = ["http://localhost:8080/v1"]
 API_KEY = "sk-no-key-required"
 
 def build_prompt(context, questions, conversation_turns):
@@ -64,7 +64,7 @@ if __name__ == "__main__":
         {"role": "model", "content": "আমি একটি জরিপ কোম্পানি থেকে বলছি। আপনি কি অনিম বলছেন?"},
         {"role": "user", "content": "জি বলছি"},
         {"role": "model", "content": "তুমি যদি হঠাৎ একদিন অদৃশ্য হয়ে যেতে পারো, প্রথমে কী করতে চাইবে?"},
-        {"role": "user", "content": "ছাত্রজীবন কি?"},
+        {"role": "user", "content": "আমি প্রথমে আমার বন্ধুদের সাথে মজা করতে চাইব।"},
     ]
     
-    run_inference(ENDPOINTS[1], survey_context, question_list, conversation_turns)  # Test first; loop for others
+    run_inference(ENDPOINTS[0], survey_context, question_list, conversation_turns)  # Test first; loop for others

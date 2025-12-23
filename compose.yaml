@@ -1,5 +1,5 @@
 services:
-  llm-server-1:
+  llm-server:
     image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
     ports:
       - "8080:8080"
@@ -9,20 +9,25 @@ services:
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - LLAMA_ARG_HF_REPO=hasin023/gemma3_1b_400S_p77s16v20-GGUF
-      - LLAMA_ARG_HF_FILE=gemma3-1b-ft-Q8_0.gguf
+      - LLAMA_ARG_HF_FILE=gemma3-1b-ft-Q4_K_M.gguf ## gemma3-1b-ft-Q5_K_M.gguf, gemma3-1b-ft-Q8_0.gguf
       - LLAMA_CACHE=/models
       - LLAMA_ARG_HOST=0.0.0.0
       - LLAMA_ARG_PORT=8080
-      - LLAMA_ARG_THREADS=4
-      - LLAMA_ARG_THREADS_BATCH=4
-      - LLAMA_ARG_THREADS_HTTP=-1
-      - LLAMA_ARG_PARALLEL=4
-      - LLAMA_ARG_BATCH=512
-      - LLAMA_ARG_UBATCH=512
+      # Threading - optimized for 2-core Orange Pi
+      - LLAMA_ARG_THREADS=2 # Token generation threads (match CPU cores)
+      - LLAMA_ARG_THREADS_BATCH=2 # Prompt processing threads (match CPU cores)
+      - LLAMA_ARG_THREADS_HTTP=-1 # Auto-detect for HTTP handling
+      # Parallel request slots - 2 is optimal for 2-core, can try 3-4
+      - LLAMA_ARG_N_PARALLEL=2
+      # Batching params - reduced for 2-core ARM device
+      - LLAMA_ARG_BATCH=256 # Logical batch size (reduced for lower memory)
+      - LLAMA_ARG_UBATCH=128 # Physical batch size (smaller = better latency)
+      # Context size
       - LLAMA_ARG_CTX_SIZE=8192
-      - LLAMA_ARG_LOG_FILE=/logs/server.log
-      - LLAMA_ARG_METRICS=1 # Enables --metrics
-      - LLAMA_ARG_SLEEP_IDLE_SECONDS=-1
+      # Continuous batching (enabled by default, explicit for clarity)
+      - LLAMA_ARG_CONT_BATCHING=true
+      - LLAMA_ARG_ENDPOINT_METRICS=1
+      # Model behavior
       - LLAMA_ARG_CHAT_TEMPLATE=gemma
       - LLAMA_ARG_N_PREDICT=-1
       - LLAMA_ARG_TOP_K=20
@@ -30,53 +35,11 @@ services:
       - LLAMA_ARG_MIN_P=0.05
       - LLAMA_ARG_TEMP=0.4
       - LLAMA_ARG_REPEAT_PENALTY=1.1
+      # Performance optimizations
       - LLAMA_ARG_NUMA=distribute
-      - LLAMA_ARG_NO_WEBUI=1 # Disables web UI if not needed
-      - LLAMA_ARG_WARMUP=1 # Enables --warmup
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 20s
-      timeout: 10s
-      retries: 10
-    cpus: 2
-
-  llm-server-2:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./models:/models
-      - ./logs:/logs
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - LLAMA_ARG_HF_REPO=hasin023/gemma3_1b_400S_p77s16v20-GGUF
-      - LLAMA_ARG_HF_FILE=gemma3-1b-ft-Q8_0.gguf
-      - LLAMA_CACHE=/models
-      - LLAMA_ARG_HOST=0.0.0.0
-      - LLAMA_ARG_PORT=8081
-      - LLAMA_ARG_THREADS=4
-      - LLAMA_ARG_THREADS_BATCH=4
-      - LLAMA_ARG_THREADS_HTTP=-1
-      - LLAMA_ARG_PARALLEL=4
-      - LLAMA_ARG_BATCH=512
-      - LLAMA_ARG_UBATCH=512
-      - LLAMA_ARG_CTX_SIZE=8192
-      - LLAMA_ARG_LOG_FILE=/logs/server.log
-      - LLAMA_ARG_METRICS=1 # Enables --metrics
+      - LLAMA_ARG_WARMUP=true
+      - LLAMA_ARG_NO_WEBUI=true
       - LLAMA_ARG_SLEEP_IDLE_SECONDS=-1
-      - LLAMA_ARG_CHAT_TEMPLATE=gemma
-      - LLAMA_ARG_N_PREDICT=-1
-      - LLAMA_ARG_TOP_K=20
-      - LLAMA_ARG_TOP_P=0.8
-      - LLAMA_ARG_MIN_P=0.05
-      - LLAMA_ARG_TEMP=0.4
-      - LLAMA_ARG_REPEAT_PENALTY=1.1
-      - LLAMA_ARG_NUMA=distribute
-      - LLAMA_ARG_NO_WEBUI=1 # Disables web UI if not needed
-      - LLAMA_ARG_WARMUP=1 # Enables --warmup
-    depends_on:
-      llm-server-1:
-        condition: service_healthy
     cpus: 2
 
 volumes:
