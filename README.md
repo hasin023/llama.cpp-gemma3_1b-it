@@ -72,3 +72,6 @@ llm-server params ->
 - `-t, --threads N` number of CPU threads to use during generation (default: -1) (env: LLAMA_ARG_THREADS)
 - `-td, --threads-draft N` number of threads to use during generation (default: same as --threads)
 - `-tbd, --threads-batch-draft N` number of threads to use during batch and prompt processing (default: same as --threads-draft)
+
+- `-np, --parallel N` number of server slots (default: -1, -1 = auto) (env: LLAMA_ARG_N_PARALLEL)
+- `-cb, --cont-batching, -nocb, --no-cont-batching` whether to enable continuous batching (a.k.a dynamic batching) (default: enabled) (env: LLAMA_ARG_CONT_BATCHING)
