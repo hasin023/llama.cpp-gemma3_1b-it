@@ -1,0 +1,41 @@
+# Git files
+
+.git
+.gitignore
+
+# Logs and temp files
+
+\*.tmp
+tmp/
+
+# Python cache and build artifacts
+
+**pycache**/
+_.pyc
+_.pyo
+\*.pyd
+.pytest_cache/
+
+# Docker-related (exclude compose/env to avoid baking secrets, but they're mounted as volumes anyway)
+
+compose.yaml
+.env
+
+# Test scripts (not needed in image)
+
+llama-server_docker_inf.py
+
+# Editor/IDE files
+
+.vscode/
+.idea/
+_.swp
+_.swo
+
+# Other common exclusions
+
+node*modules/
+.venv/
+*.bak
+\_.DS_Store
+Thumbs.db
