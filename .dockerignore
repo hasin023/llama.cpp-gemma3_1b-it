@@ -5,8 +5,10 @@
 
 # Logs and temp files
 
-\*.tmp
-tmp/
+logs/
+models/
+*.gguf
+
 
 # Python cache and build artifacts
 
@@ -24,6 +26,8 @@ compose.yaml
 # Test scripts (not needed in image)
 
 llama-server_docker_inf.py
+llama-server_docker_inf_chat.py
+LlaMacppServer.md
 
 # Editor/IDE files
 

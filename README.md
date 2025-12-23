@@ -1,136 +1,150 @@
-## Model Download
+# LLaMA.cpp Server on Edge device (Docker)
 
-Download the model manually to a location locally and save it there -
+This repository contains the configuration for a self-hosted, OpenAI-compatible Large Language Model (LLM) server optimized for the Edge device platform (ARM64). It leverages `llama.cpp` to provide high-performance inference on resource-constrained edge devices.
 
-```bash
-C:\llama\models
-```
+## Technical Overview and Advantages
 
-Download the models from here for 1b quantized to 4-bit [https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF](https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF)
+### Why LLaMA.cpp for Edge Deployment?
 
-Choose a quantized model file (recommended for balance of speed/quality):
+For edge deployments on devices like the Edge device (typically 2-8 GB RAM, ARMv8 CPU), standard heavy-framework solutions (e.g., PyTorch/HuggingFace Transformers) are often infeasible due to memory overhead and lack of optimization. LLaMA.cpp offers critical advantages for this use case:
 
-- `gemma-3-1b-it-Q4_K_M.gguf` → good for most systems (4-bit, ~0.6 GB)
+1.  **Quantization Efficiency**:
+    Using GGUF quantization (e.g., Q4_K_M), we reduce memory bandwidth requirements significantly while retaining model accuracy. A 1B parameter model typically requires <1GB RAM, allowing it to reside entirely in physical memory without swapping.
 
-Save it to:
+2.  **Continuous Batching**:
+    Unlike traditional sequential inference, our configuration uses continuous batching. This allows the server to process multiple requests concurrently by interleaving their token generation steps. This maximizes CPU/GPU utilization and prevents a long-running request from blocking shorter ones.
 
-```bash
-C:\llama\models\gemma-3-1b-it-Q4_K_M.gguf
-```
+3.  **Slot-Based Parallelism**:
+    We configure a fixed number of "slots" (concurrent contexts). Each slot maintains its own KV cache. When a request arrives, it is assigned to an idle slot. This architecture is essential for maintaining throughput in a multi-user environment.
 
----
+4.  **Hardware Optimization**:
+    The Docker image (`ghcr.io/ggml-org/llama.cpp:server`) includes ARM64-optimized kernels (NEON/Int8/Int4 dot products), ensuring that the CPU is utilized to its maximum theoretical throughput.
 
-## Run the Docker Command (Using `-m`)
+## System Architecture
 
-Open **PowerShell** (as a regular user — no admin needed) and run:
+- **Runtime**: Docker Container (Isolated, Portable)
+- **Engine**: llama.cpp Server (HTTP/REST API)
+- **Monitoring**: Python Sidecar Service (Prometheus Metrics Poll)
+- **Hardware Profile**:
+  - Target: Edge device (2-Core / 4-Core variants)
+  - Optimization: Thread affinity matched to physical cores
 
-```powershell
-docker run -v C:/llama/models:/models -p 5050:8000 ghcr.io/ggml-org/llama.cpp:server -m /models/gemma-3-1b-it-Q4_K_M.gguf --port 8000 --host 0.0.0.0 -n 512
-```
+## Configuration Reference
 
-Basic web UI can be accessed via browser: [http://localhost:5050](localhost:5050)
-Chat completion endpoint: [http://localhost:5050/v1/chat/completions](localhost:5050/v1/chat/completions)
+The system is tuned via environment variables in `compose.yaml`. The current configuration is optimized for a **2-Core Edge device**.
 
----
+| Parameter                 | Value | Technical Justification                                                                  |
+| :------------------------ | :---- | :--------------------------------------------------------------------------------------- |
+| `LLAMA_ARG_THREADS`       | `2`   | Matches physical core count for token generation to minimize context switching overhead. |
+| `LLAMA_ARG_THREADS_BATCH` | `2`   | Dedicates all cores to prompt processing for faster time-to-first-token (TTFT).          |
+| `LLAMA_ARG_N_PARALLEL`    | `2`   | Defines 2 independent KV cache slots. Allows 2 concurrent users without queueing.        |
+| `LLAMA_ARG_BATCH`         | `256` | Reduced logical batch size to lower memory footprint.                                    |
+| `LLAMA_ARG_UBATCH`        | `128` | Reduced physical batch size to improve latency on slower ARM memory buses.               |
 
-## Test the Server
+_Note: For 4-core devices, increase threads and parallel slots to 4._
 
-Run the `base.py`
+## Quick Start Guide
 
----
+### 1. Model Preparation
 
-llm-server params ->
-
-- `--list-devices` print list of available devices and exit
-- `-m, --model FNAME` model path to load
-- `-mu, --model-url MODEL_URL` model download url (default: unused)
-- `-dr, --docker-repo [<repo>/]<model>[:quant]` Docker Hub model repository. repo is optional, default to ai/. quant is optional, default to :latest. example: gemma3 (default: unused)
-- `-hf, -hfr, --hf-repo <user>/<model>[:quant]` Hugging Face model repository; quant is optional, case-insensitive, default to Q4_K_M, or falls back to the first file in the repo if Q4_K_M doesn't exist. mmproj is also downloaded automatically if available. to disable, add --no-mmproj, example: unsloth/phi-4-GGUF:q4_k_m (default: unused)
-- `--offline` Offline mode: forces use of cache, prevents network access
-- `--temp N` temperature (default: 0.8)
-- `--top-k N` top-k sampling (default: 40, 0 = disabled), (env: LLAMA_ARG_TOP_K)
-- `--top-p N` top-p sampling (default: 0.9, 1.0 = disabled)
-- `--warmup`, `--no-warmup` whether to perform warmup with an empty run (default: enabled)
-- `-np, --parallel N` number of server slots (default: -1, -1 = auto)
-- `-a, --alias STRING` set alias for model name (to be used by REST API)
-- `--host HOST` ip address to listen, or bind to an UNIX socket if the address ends with .sock (default: 127.0.0.1)
-- `--port PORT` port to listen (default: 8080)
-- `--path PATH` path to serve static files from (default: )
-- `--api-prefix PREFIX` prefix path the server serves from, without the trailing slash (default: )
-- `--webui`, `--no-webui` whether to enable the Web UI (default: enabled)
-- `--chat-template-kwargs STRING` sets additional params for the json template parser
-- `-to, --timeout N` server read/write timeout in seconds (default: 600)
-- `--threads-http N` number of threads used to process HTTP requests (default: -1)
-- `--metrics` enable prometheus compatible metrics endpoint (default: disabled)
-- `--models-max N` for router server, maximum number of models to load simultaneously (default: 4, 0 = unlimited)
-- `--jinja, --no-jinja` whether to use jinja template engine for chat (default: enabled)
-- `--chat-template-file JINJA_TEMPLATE_FILE` set custom jinja chat template file (default: template taken from model's metadata) if suffix/prefix are specified, template will be disabled only commonly used templates are accepted (unless --jinja is set before this flag):
-  list of built-in templates:
-  bailing, bailing-think, bailing2, chatglm3, chatglm4, chatml, command-r, deepseek, deepseek2, deepseek3, exaone3, exaone4, falcon3, gemma, gigachat, glmedge, gpt-oss, granite, grok-2, hunyuan-dense, hunyuan-moe, kimi-k2, llama2, llama2-sys, llama2-sys-bos, llama2-sys-strip, llama3, llama4, megrez, minicpm, mistral-v1, mistral-v3, mistral-v3-tekken, mistral-v7, mistral-v7-tekken, monarch, openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss, smolvlm, vicuna, vicuna-orca, yandex, zephyr
-
-- `--sleep-idle-seconds SECONDS` number of seconds of idleness after which the server will sleep (default: -1; -1 = disabled)
-- `-t, --threads N` number of CPU threads to use during generation (default: -1) (env: LLAMA_ARG_THREADS)
-- `-td, --threads-draft N` number of threads to use during generation (default: same as --threads)
-- `-tbd, --threads-batch-draft N` number of threads to use during batch and prompt processing (default: same as --threads-draft)
-
-- `-np, --parallel N` number of server slots (default: -1, -1 = auto) (env: LLAMA_ARG_N_PARALLEL)
-- `-cb, --cont-batching, -nocb, --no-cont-batching` whether to enable continuous batching (a.k.a dynamic batching) (default: enabled) (env: LLAMA_ARG_CONT_BATCHING)
-
----
+Download the desired GGUF model and place it in the `models/` directory.
 
 ```bash
-cpus: N # Docker's hard limit on CPU usage
-LLAMA_ARG_THREADS=N # Threads for token generation, During inference (outputting tokens)
-LLAMA_ARG_THREADS_BATCH=N # Threads for prompt processing, When processing the input prompt
-LLAMA_ARG_N_PARALLEL=N # How many slots the server has for concurrent requests
+mkdir -p models logs
+# Place your .gguf file in ./models/
 ```
 
-# On the Orange Pi
+### 2. Service Initialization
+
+Start the containerized stack.
 
 ```bash
-nproc --all
+docker compose up -d
 ```
 
-### Recommended Configuration
+### 3. Verification
 
-| Orange Pi Cores | cpus        | LLAMA_ARG_THREADS | LLAMA_ARG_N_PARALLEL |
-| :-------------- | :---------- | :---------------- | :------------------- |
-| 2 cores         | 2 (or omit) | 2                 | 2-4                  |
-| 4 cores         | 4 (or omit) | 4                 | 4-6                  |
-| 8 cores         | 6-8         | 6-8               | 4-8                  |
+Verify the service health and network accessibility.
 
-For a typical **4-core Orange Pi**, I recommend:
+```bash
+# Check local IP
+hostname -I
 
-```yaml
-services:
-  llm-server:
-    # ... other config ...
-    environment:
-      - LLAMA_ARG_THREADS=4 # Use all cores for inference
-      - LLAMA_ARG_THREADS_BATCH=4 # Use all cores for prompt processing
-      - LLAMA_ARG_N_PARALLEL=4 # 4 concurrent slots
-    deploy:
-      resources:
-        limits:
-          cpus: "4" # Allow container to use all 4 cores
+# Query health endpoint (replace IP accordingly)
+curl http://<ORANGE_PI_IP>:8080/health
 ```
 
-For a **2-core device**:
+## Logging and Observability
 
-```yaml
-environment:
-  - LLAMA_ARG_THREADS=2
-  - LLAMA_ARG_THREADS_BATCH=2
-  - LLAMA_ARG_N_PARALLEL=2 # Reduce slots to match
-deploy:
-  resources:
-    limits:
-      cpus: "2"
+The system implements a dual-layer logging strategy for audit and performance tracking.
+
+### Application Logs
+
+Located at: `./logs/server.log`
+
+- Captures full verbosity input prompts and generated responses.
+- Includes token counts (prompt tokens vs. generated tokens) for billing/usage analysis.
+- Provides millisecond-level timing for "prompt eval" and "generation" stages.
+
+### Performance Metrics
+
+Located at: `./logs/monitor_metrics.log`
+
+- Generated by the sidecar `monitor` service.
+- Structured JSON logs suitable for ingestion by log aggregation systems (e.g., ELK, Splunk).
+- Key Metrics:
+  - `kv_cache_usage`: Ratio of context window utilized.
+  - `slots_busy`: Live count of active requests.
+  - `requests_queued`: Backpressure indicator.
+
+## Deployment Strategy (Cluster/Fleet)
+
+To deploy this scalable architecture across a fleet of Edge devices, follow this standardized procedure.
+
+### 1. Base Image Preparation
+
+Ensure all nodes have the following prerequisites:
+
+- Docker Engine & Docker Compose plugin installed.
+- User permissions set for the `docker` group.
+- Static IP address assignment (recommended for API stability).
+
+### 2. Standardization
+
+Maintain a consistent directory structure across the cluster:
+`/opt/llm-server/` containing:
+
+- `compose.yaml`
+- `monitor.py`
+- `models/` (Populated ideally via rsync or shared network storage mount to ensure model version consistency)
+
+### 3. Ansible / SSH Deployment
+
+For multi-device management, use a simple loop or Ansible playbook to update configuration.
+
+**Update Procedure:**
+
+1.  `docker compose down`
+2.  `git pull` (or rsync updated config)
+3.  `docker compose up -d`
+
+### 4. Load Balancing
+
+Do not expose individual Pi IPs to end users. Configure an upstream load balancer (e.g., NGINX, HAProxy) to distribute traffic across the fleet nodes.
+
+```nginx
+upstream llm_cluster {
+    server 192.168.1.50:8080;
+    server 192.168.1.51:8080;
+    server 192.168.1.52:8080;
+}
 ```
 
-- Find Orange PI IP - `hostname -I`
+## Testing and Validation
 
-```python
-# Change this on your laptop/client
-ENDPOINTS = ["http://192.168.1.50:8080/v1"]
+Use the included Locust script for load verification.
+
+```bash
+# Stress test with 50 concurrent users
+locust -f LOCUST_llama-server_docker_inf.py --headless -u 50 -r 17 -t 120s --host http://localhost:8080
 ```

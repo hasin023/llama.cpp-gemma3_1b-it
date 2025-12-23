@@ -26,7 +26,13 @@ services:
       - LLAMA_ARG_CTX_SIZE=8192
       # Continuous batching (enabled by default, explicit for clarity)
       - LLAMA_ARG_CONT_BATCHING=true
-      - LLAMA_ARG_ENDPOINT_METRICS=1
+      # === LOGGING & MONITORING ===
+      - LLAMA_LOG_TIMESTAMPS=1 # Enable timestamps in logs
+      - LLAMA_ARG_VERBOSE=1 # Enable verbose logging (prompts, responses)
+      - LLAMA_LOG_VERBOSITY=20 # High verbosity for debugging
+      - LLAMA_ARG_ENDPOINT_METRICS=1 # Enable Prometheus metrics endpoint
+      - LLAMA_ARG_ENDPOINT_SLOTS=1 # Enable Slots endpoint for utilizing tracking
+      - LLAMA_LOG_FILE=/logs/server.log # CORRECT ENV VAR for log file
       # Model behavior
       - LLAMA_ARG_CHAT_TEMPLATE=gemma
       - LLAMA_ARG_N_PREDICT=-1
@@ -40,7 +46,26 @@ services:
       - LLAMA_ARG_WARMUP=true
       - LLAMA_ARG_NO_WEBUI=true
       - LLAMA_ARG_SLEEP_IDLE_SECONDS=-1
-    cpus: 2
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+
+  monitor:
+    image: python:3.9-slim
+    volumes:
+      - ./logs:/logs
+      - ./monitor.py:/app/monitor.py
+    working_dir: /app
+    command: sh -c "pip install requests && python monitor.py"
+    depends_on:
+      - llm-server
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 128M
 
 volumes:
   models:

@@ -5,7 +5,7 @@ This test verifies TRUE parallelism - checking that ALL concurrent requests
 receive valid LLM-generated responses simultaneously, not just that requests overlap.
 
 Usage:
-    locust -f LOCUST_llama-server_docker_inf.py --headless -u 8 -r 2 -t 60s --host http://localhost:8080
+    locust -f LOCUST_llama-server_docker_inf.py --headless -u 50 -r 17 -t 120s --host http://localhost:8080
 
 
 Key Metrics Tested:
