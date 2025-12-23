@@ -1,1 +1,4 @@
 openai
+locust
+requests
+python-dotenv

@@ -1,9 +1,13 @@
 import time
+import os
 from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Config
 ENDPOINTS = ["http://localhost:8080/v1"]
-API_KEY = "sk-no-key-required"
+API_KEY = os.getenv("OPENAI_API_KEY", "sk-no-key-required")
 
 def run_chat_inference(endpoint, context, questions, conversation_history):
     """
@@ -71,4 +75,4 @@ if __name__ == "__main__":
     ]
 
     # Test with first endpoint
-    run_chat_inference(ENDPOINTS[1], survey_context, question_list, conversation_history)
+    run_chat_inference(ENDPOINTS[0], survey_context, question_list, conversation_history)

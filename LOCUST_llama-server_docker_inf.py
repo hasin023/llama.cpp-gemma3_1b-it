@@ -17,12 +17,15 @@ Key Metrics Tested:
 
 from locust import HttpUser, task, between, events
 import time
+import os
 from threading import Lock
 import statistics
 from collections import defaultdict
 import json
 import hashlib
+from dotenv import load_dotenv
 
+load_dotenv()
 
 # ============================================================================
 # METRICS TRACKING
@@ -132,6 +135,7 @@ class LLMUser(HttpUser):
     """
     host = "http://localhost:8080"
     wait_time = between(0, 0.1)  # Minimal wait to maximize concurrency
+    api_key = os.getenv("OPENAI_API_KEY", "sk-no-key-required")
 
     @task
     def inference_request(self):
@@ -147,7 +151,7 @@ class LLMUser(HttpUser):
             response = self.client.post(
                 "/v1/completions",
                 json=PAYLOAD,
-                headers={"Authorization": "Bearer sk-no-key-required"},
+                headers={"Authorization": f"Bearer {self.api_key}"},
                 name="llm_completion",
                 timeout=120
             )

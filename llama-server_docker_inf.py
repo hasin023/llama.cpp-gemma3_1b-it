@@ -1,9 +1,13 @@
 import time
+import os
 from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Config - Single server with parallel slots handles all requests
 ENDPOINTS = ["http://localhost:8080/v1"]
-API_KEY = "sk-no-key-required"
+API_KEY = os.getenv("OPENAI_API_KEY", "sk-no-key-required")
 
 def build_prompt(context, questions, conversation_turns):
     prompt = """<start_of_turn>user

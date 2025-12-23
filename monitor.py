@@ -7,6 +7,8 @@ from datetime import datetime
 
 # Configure logging
 LOG_FILE = "/logs/monitor_metrics.log"
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -20,18 +22,22 @@ HEALTH_URL = f"{SERVER_URL}/health"
 
 def get_metrics():
     try:
-        response = requests.get(METRICS_URL, timeout=10)
+        response = requests.get(METRICS_URL, timeout=30)
         if response.status_code == 200:
             return response.text
+    except requests.exceptions.ReadTimeout:
+        logging.warning("Server busy: Metrics request timed out (30s)")
     except Exception as e:
         logging.error(f"Failed to fetch metrics: {e}")
     return None
 
 def get_slots():
     try:
-        response = requests.get(SLOTS_URL, timeout=10)
+        response = requests.get(SLOTS_URL, timeout=30)
         if response.status_code == 200:
             return response.json()
+    except requests.exceptions.ReadTimeout:
+        logging.warning("Server busy: Slots request timed out (30s)")
     except Exception as e:
         logging.error(f"Failed to fetch slots: {e}")
     return None
