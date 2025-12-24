@@ -1,7 +1,7 @@
 # Llama.cpp Server Performance Benchmark & Resource Analysis
 
 **Date:** 2025-12-24
-**Subject:** Comparative Analysis of 1B Model Quantization on different Hardware
+**Subject:** Comparative Analysis of 1B Model on different Hardware
 
 ## 1. Executive Summary
 
@@ -72,6 +72,22 @@ _Hardware:_ System B (Intel i5)
 - **Test 1 (Failure State):** With a 1GB limit, the 1.2GB Q8 model forces the OS to use disk swap. The CPU spends 30-60% of its time waiting for memory pages to be fetched from disk (I/O Wait), resulting in catastrophic performance degradation.
 - **Test 2 (Success State):** Relaxing the limit to 2GB allows the entire model + KV cache to reside in RAM. The CPU bottleneck returns (200% usage), and throughput represents the true compute capability of the i5 for 8-bit inference.
 
+### 3.3 Scenario C: The Middle Ground (Q5 Model)
+
+_Model:_ `gemma3-1b-ft-Q5_K_M.gguf`
+_Hardware:_ System B (Intel i5)
+_Constraint:_ Default (1GB RAM Limit)
+
+| Metric              | System B (Intel i5)    |
+| :------------------ | :--------------------- |
+| **Total Requests**  | 120                    |
+| **Throughput**      | **1.01 req/s**         |
+| **Avg Latency**     | 6.73 s                 |
+| **CPU Utilization** | 200% (Full Saturation) |
+
+**Analysis:**
+The Q5 model fits within the 1GB limit, showing performance very close to the Q4 model (1.01 req/s vs 1.10 req/s). This confirms that Q5 is a viable option for 1GB devices if slightly higher precision is needed without hitting the memory wall.
+
 ---
 
 ## 4. Technical Conclusion
@@ -82,6 +98,17 @@ _Hardware:_ System B (Intel i5)
     - Q4 Model: 1.10 req/s (Fastest)
     - Q8 Model: 0.71 req/s (~35% slower due to compute intensity)
     - _Note: This 35% drop is expected due to the higher computational cost of processing 8-bit weights vs 4-bit weights._
+
+### 4.1 Analysis: 2GB Memory for Q4/Q5?
+
+**Question:** _If we allocate 2GB memory to Q4 or Q5 scenarios, will performance improve?_
+
+**Answer: No/Negligible.**
+
+- **Reasoning:** The performance cliff seen in Q8 is due to **swapping** (data moving between RAM and Disk).
+- **Q4 & Q5 status:** Both models (~700MB - 900MB) already fit entirely within the 1GB allocation.
+- **Impact:** Increasing memory to 2GB provides **zero additional throughput** because the model is already running at memory-speed (RAM), not disk-speed. You cannot go faster than "Pure RAM."
+- **Use Case:** The only benefit of 2GB for Q4/Q5 would be if you wanted to drastically increase the **Context Window** (e.g., from 8192 to 16384 tokens) or **Batch Size**, which consumes extra VRAM/RAM. for the _same_ workload, it yields no gain.
 
 ## 5. Recommendations
 

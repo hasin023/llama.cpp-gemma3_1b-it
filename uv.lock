@@ -572,6 +572,7 @@ dependencies = [
     { name = "locust" },
     { name = "openai" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "typer" },
 ]
 
@@ -580,6 +581,7 @@ requires-dist = [
     { name = "locust", specifier = ">=2.42.6" },
     { name = "openai", specifier = ">=2.14.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "requests", specifier = ">=2.32.4" },
     { name = "typer", specifier = ">=0.20.1" },
 ]
 

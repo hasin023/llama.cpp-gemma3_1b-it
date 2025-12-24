@@ -1,8 +1,29 @@
 services:
   llm-server:
-    image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
     ports:
       - "8080:8080"
+
+    # === MODE A: CPU ONLY (DEFAULT) ===
+    image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G # Standard (Q4/Q5 models)
+          # memory: 2G # Uncomment for Q8 models (Requires >1.5GB System RAM)
+    # ==================================
+
+    # === MODE B: GPU ENABLED (Uncomment to enable) ===
+    # image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # =================================================
+
     volumes:
       - ./models:/models
       - ./logs:/logs
@@ -11,6 +32,10 @@ services:
       - LLAMA_ARG_HF_REPO=${LLAMA_ARG_HF_REPO}
       - LLAMA_ARG_HF_FILE=${LLAMA_ARG_HF_FILE} ## e.g., gemma3-1b-ft-Q4_K_M.gguf, gemma3-1b-ft-Q5_K_M.gguf, gemma3-1b-ft-Q8_0.gguf
       - LLAMA_CACHE=/models
+
+      # GPU Offloading (Uncomment for GPU Mode)
+      # - LLAMA_ARG_N_GPU_LAYERS=-1
+
       - LLAMA_ARG_HOST=0.0.0.0
       - LLAMA_ARG_PORT=${LLAMA_ARG_PORT}
       # Threading - optimized for 2-core Orange Pi
@@ -47,11 +72,7 @@ services:
       - LLAMA_ARG_NO_WEBUI=true
       - LLAMA_ARG_SLEEP_IDLE_SECONDS=-1
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 1G
+    # Note: Deployment resources are defined in the MODE blocks above
 
   monitor:
     image: python:3.9-slim

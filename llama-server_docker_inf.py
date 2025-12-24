@@ -41,7 +41,7 @@ def run_inference(endpoint, context, questions, conversation_turns):
     start_time = time.time()
     
     response = client.completions.create(
-        model="gemma3_1b_400S_p77s16v20-Q8_0",  # Arbitrary
+        model="gemma3_1b_400S_p77s16v20",  # Arbitrary
         prompt=prompt_text,
         max_tokens=512,     # Limit for speed
         stream=False        # Sync for simple timing

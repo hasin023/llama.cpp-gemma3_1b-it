@@ -79,8 +79,8 @@ The `compose.yaml` sets a hard memory limit for the container (default `1G`).
 
 **Solution:**
 
-1. **Increase Memory Limit:** Update `compose.yaml` to allow more RAM if your device has it (e.g., `memory: 2G`).
-2. **Use Lower Quantization:** Stick to Q4_K_M or Q5_K_M models for devices with < 2GB RAM.
+1. **Increase Memory Limit:** Update `compose.yaml` to allow more RAM if your device has it (uncomment `memory: 2G` for Q8 models, requires >1.5GB System RAM).
+2. **Use Lower Quantization:** Stick to Q4_K_M or Q5_K_M models for devices with < 1.5GB RAM.
 3. **Optimize Cache:** If stuck with 1GB, reduce context size (`LLAMA_ARG_CTX_SIZE`) or quantize the KV cache (`LLAMA_ARG_CACHE_TYPE_K=q8_0`).
 
 ### Alternative Scenario: Split-Core Deployment (2 Containers, 2 Cores Each)
@@ -135,12 +135,63 @@ docker compose up -d
 Verify the service health and network accessibility.
 
 ```bash
-# Check local IP
-hostname -I
-
 # Query health endpoint (replace IP accordingly)
+hostname -I
 curl http://<ORANGE_PI_IP>:8080/health
 ```
+
+### 4. Hardware Acceleration (Optional)
+
+#### Enabling GPU Support
+
+If your host machine possesses an NVIDIA GPU, enabling hardware acceleration can drastically improve inference throughput (tokens/sec).
+
+**Prerequisites:**
+
+- NVIDIA GPU with valid drivers installed.
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on the host.
+
+**Instructions:**
+
+1. Open `compose.yaml`.
+2. **Comment out** the entire **MODE A: CPU ONLY** block (add `#` to valid lines).
+3. **Uncomment** the entire **MODE B: GPU ENABLED** block (remove `#`).
+4. Scroll down to the `environment:` section and **uncomment** `- LLAMA_ARG_N_GPU_LAYERS=-1`.
+
+**Example of GPU Mode:**
+
+```yaml
+  llm-server:
+    ports:
+      - "8080:8080"
+
+    # === MODE A: CPU ONLY (DEFAULT) ===
+    # image: ghcr.io/ggml-org/llama.cpp:server        <-- COMMENTED
+    # deploy:                                         <-- COMMENTED
+    #   resources:                                    <-- COMMENTED
+    #     limits:                                     <-- COMMENTED
+    #       cpus: "2"                                 <-- COMMENTED
+    #       memory: 1G                                <-- COMMENTED
+    # ==================================
+
+    # === MODE B: GPU ENABLED (Uncomment to enable) ===
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda     <-- UNCOMMENTED
+    deploy:                                           <-- UNCOMMENTED
+      resources:                                      <-- UNCOMMENTED
+        reservations:                                 <-- UNCOMMENTED
+          devices:                                    <-- UNCOMMENTED
+            - driver: nvidia                          <-- UNCOMMENTED
+              count: all                              <-- UNCOMMENTED
+              capabilities: [gpu]                     <-- UNCOMMENTED
+    # =================================================
+
+    environment:
+      # ...
+      # GPU Offloading (Uncomment for GPU Mode)
+      - LLAMA_ARG_N_GPU_LAYERS=-1                     <-- UNCOMMENTED
+```
+
+5. Restart the stack: `docker compose up -d --force-recreate`
 
 ## Logging and Observability
 
