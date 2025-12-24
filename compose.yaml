@@ -5,12 +5,15 @@ services:
 
     # === MODE A: CPU ONLY (DEFAULT) ===
     image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 1G # Standard (Q4/Q5 models)
-          # memory: 2G # Uncomment for Q8 models (Requires >1.5GB System RAM)
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.server
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2"
+    #       memory: 1G # Standard (Q4/Q5 models)
+    # memory: 2G # Uncomment for Q8 models (Requires >1.5GB System RAM)
     # ==================================
 
     # === MODE B: GPU ENABLED (Uncomment to enable) ===
@@ -39,21 +42,21 @@ services:
       - LLAMA_ARG_HOST=0.0.0.0
       - LLAMA_ARG_PORT=${LLAMA_ARG_PORT}
       # Threading - optimized for 2-core Orange Pi
-      - LLAMA_ARG_THREADS=2 # Token generation threads (match CPU cores)
-      - LLAMA_ARG_THREADS_BATCH=2 # Prompt processing threads (match CPU cores)
+      - LLAMA_ARG_THREADS=4 # Token generation threads (match CPU cores)
+      - LLAMA_ARG_THREADS_BATCH=4 # Prompt processing threads (match CPU cores)
       - LLAMA_ARG_THREADS_HTTP=-1 # Auto-detect for HTTP handling
       # Parallel request slots - 2 is optimal for 2-core, can try 3-4
-      - LLAMA_ARG_N_PARALLEL=2
+      - LLAMA_ARG_N_PARALLEL=1
       # Batching params - reduced for 2-core ARM device
-      - LLAMA_ARG_BATCH=256 # Logical batch size (reduced for lower memory)
-      - LLAMA_ARG_UBATCH=128 # Physical batch size (smaller = better latency)
+      - LLAMA_ARG_BATCH=512 # Logical batch size (reduced for lower memory)
+      - LLAMA_ARG_UBATCH=256 # Physical batch size (smaller = better latency)
       # Context size
       - LLAMA_ARG_CTX_SIZE=8192
       # Continuous batching (enabled by default, explicit for clarity)
       - LLAMA_ARG_CONT_BATCHING=true
       # === LOGGING & MONITORING ===
       - LLAMA_LOG_TIMESTAMPS=1 # Enable timestamps in logs
-      - LLAMA_ARG_VERBOSE=1 # Enable verbose logging (prompts, responses)
+      - LLAMA_ARG_VERBOSE=0 # Enable verbose logging (prompts, responses)
       - LLAMA_LOG_VERBOSITY=20 # High verbosity for debugging
       - LLAMA_ARG_ENDPOINT_METRICS=1 # Enable Prometheus metrics endpoint
       - LLAMA_ARG_ENDPOINT_SLOTS=1 # Enable Slots endpoint for utilizing tracking
@@ -61,10 +64,10 @@ services:
       # Model behavior
       - LLAMA_ARG_CHAT_TEMPLATE=gemma
       - LLAMA_ARG_N_PREDICT=-1
-      - LLAMA_ARG_TOP_K=20
+      - LLAMA_ARG_TOP_K=10
       - LLAMA_ARG_TOP_P=0.8
       - LLAMA_ARG_MIN_P=0.05
-      - LLAMA_ARG_TEMP=0.4
+      - LLAMA_ARG_TEMP=0.8
       - LLAMA_ARG_REPEAT_PENALTY=1.1
       # Performance optimizations
       - LLAMA_ARG_NUMA=distribute

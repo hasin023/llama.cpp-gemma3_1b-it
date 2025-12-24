@@ -368,8 +368,28 @@ def on_test_stop(environment, **kwargs):
         
         print(f"\n   Average response time:    {statistics.mean(response_times):.3f}s")
         print(f"   Median response time:     {statistics.median(response_times):.3f}s")
-        print(f"   Min response time:        {min(response_times):.3f}s")
-        print(f"   Max response time:        {max(response_times):.3f}s")
+        min_time = min(response_times)
+        max_time = max(response_times)
+        
+        print(f"   Min response time:        {min_time:.3f}s")
+        print(f"   Max response time:        {max_time:.3f}s")
+
+        # 90th Percentile Calculation
+        sorted_times = sorted(response_times)
+        if len(sorted_times) >= 10:
+             # Use accurate index for 90th percentile
+             p90_index = int(0.90 * len(sorted_times))
+             if p90_index >= len(sorted_times): p90_index = len(sorted_times) - 1
+             p90 = sorted_times[p90_index]
+             print(f"   90th percentile time:     {p90:.3f}s")
+        else:
+             print(f"   90th percentile time:     (not enough samples)")
+
+        # Calculate percentage of requests within 10% of minimum inference time
+        threshold = min_time * 1.10
+        fast_requests = len([t for t in response_times if t <= threshold])
+        fast_percentage = (fast_requests / len(response_times)) * 100
+        print(f"   Requests within 10% of min: {fast_percentage:.1f}% ({fast_requests}/{len(response_times)})")
         if len(response_times) > 1:
             print(f"   Std deviation:            {statistics.stdev(response_times):.3f}s")
         
@@ -512,8 +532,8 @@ def on_test_stop(environment, **kwargs):
 # Optional: Real-time progress updates
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    """Real-time request logging (disabled by default)"""
-    # Uncomment for real-time visibility:
-    # status = "✓" if not exception else "✗"
-    # print(f"[{time.strftime('%H:%M:%S')}] {status} {name}: {response_time:.0f}ms")
-    pass
+    """Real-time request logging"""
+    if not exception:
+        print(f"[{time.strftime('%H:%M:%S')}] Request {name}: {response_time:.2f}ms")
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] ✗ Request {name} failed: {exception}")

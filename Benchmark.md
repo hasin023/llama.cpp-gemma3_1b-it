@@ -50,6 +50,8 @@ _Constraint:_ Default (1GB RAM Limit)
 | **Total Requests**  | 311                    | 116                    | -62.7%     |
 | **Throughput**      | **2.61 req/s**         | **1.10 req/s**         | -57.8%     |
 | **Avg Latency**     | 4.11 s                 | 7.03 s                 | +71.0%     |
+| **Min Latency**     | 0.673 s                | 2.673 s                | \_         |
+| **Max Latency**     | 1.910 s                | 12.910 s               | \_         |
 | **CPU Utilization** | 200% (Full Saturation) | 200% (Full Saturation) | Equal      |
 
 **Analysis:**
@@ -83,10 +85,29 @@ _Constraint:_ Default (1GB RAM Limit)
 | **Total Requests**  | 120                    |
 | **Throughput**      | **1.01 req/s**         |
 | **Avg Latency**     | 6.73 s                 |
+| **Min Latency**     | 0.873 s                |
+| **Max Latency**     | 2.910 s                |
 | **CPU Utilization** | 200% (Full Saturation) |
 
 **Analysis:**
 The Q5 model fits within the 1GB limit, showing performance very close to the Q4 model (1.01 req/s vs 1.10 req/s). This confirms that Q5 is a viable option for 1GB devices if slightly higher precision is needed without hitting the memory wall.
+
+---
+
+### 3.4 Scenario D: The Optimized (Q4 Model)
+
+_Model:_ `gemma3-1b-ft-Q4_K_M.gguf`
+_Hardware:_ System B (Intel i5)
+_Constraint:_ No RAM Limit
+
+| Metric              | System B (Intel i5)                |
+| :------------------ | :--------------------------------- |
+| **Total Requests**  | 55 (in 60 seconds)                 |
+| **Throughput**      | **1.17 req/s**                     |
+| **Avg Latency**     | 1.017 s                            |
+| **Min Latency**     | 0.673 s                            |
+| **Max Latency**     | 1.910 s                            |
+| **CPU Utilization** | 400% (Full Saturation) (4 Threads) |
 
 ---
 
