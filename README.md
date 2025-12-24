@@ -124,7 +124,13 @@ mkdir -p models logs
 
 ### 2. Service Initialization
 
-Start the containerized stack.
+First of all, validate the docker compose file syntax.
+
+```bash
+docker compose config
+```
+
+If the syntax is correct, start the containerized stack.
 
 ```bash
 docker compose up -d
