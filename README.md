@@ -67,6 +67,22 @@ If you run two containers efficiently configured for 4 cores on a single 4-core 
 - **Single Container (Best Performance):** Run 1 container with `LLAMA_ARG_THREADS=4` and `LLAMA_ARG_N_PARALLEL=4`.
 - **Multi-Container (Isolation):** If you MUST run two containers, limit each to 2 cores (`cpus: "2"` in Docker) and set `LLAMA_ARG_THREADS=2`.
 
+### Performance Troubleshooting: Memory Constraints (Q4 vs Q8)
+
+If you observe **low CPU usage (40-70%)** and **extremely low throughput (< 0.1 req/s)** when using higher precision models (e.g., Q8), you are likely hitting a **Memory Bottleneck**.
+
+**The Issue:**
+The `compose.yaml` sets a hard memory limit for the container (default `1G`).
+
+- **Q4 Models (~700MB):** Fit comfortably within RAM along with the KV cache (Context). Performance is high because the model stays in physical memory.
+- **Q8 Models (~1.2GB):** Exceed the 1GB limit. The OS is forced to continuously swap memory pages to disk ("thrashing"). The CPU sits idle waiting for slow Disk I/O, resulting in poor performance.
+
+**Solution:**
+
+1. **Increase Memory Limit:** Update `compose.yaml` to allow more RAM if your device has it (e.g., `memory: 2G`).
+2. **Use Lower Quantization:** Stick to Q4_K_M or Q5_K_M models for devices with < 2GB RAM.
+3. **Optimize Cache:** If stuck with 1GB, reduce context size (`LLAMA_ARG_CTX_SIZE`) or quantize the KV cache (`LLAMA_ARG_CACHE_TYPE_K=q8_0`).
+
 ### Alternative Scenario: Split-Core Deployment (2 Containers, 2 Cores Each)
 
 **Scenario:** Running 2 independent containers, each strictly limited to 2 physical cores.

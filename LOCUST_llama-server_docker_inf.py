@@ -117,7 +117,7 @@ CONVERSATION_TURNS = [
 PROMPT = build_prompt(SURVEY_CONTEXT, QUESTION_LIST, CONVERSATION_TURNS)
 
 PAYLOAD = {
-    "model": "gemma3_1b_400S_p77s16v20-Q8_0",
+    "model": "gemma3_1b_400S_p77s16v20",
     "prompt": PROMPT,
     "max_tokens": 256,
     "stream": False
