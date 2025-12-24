@@ -335,13 +335,13 @@ def on_test_stop(environment, **kwargs):
     successful_requests = metrics.requests
     
     print("\n" + "="*100)
-    print(" " * 20 + "🔬 TRUE PARALLELISM VERIFICATION REPORT 🔬")
+    print(" " * 20 + "TRUE PARALLELISM VERIFICATION REPORT")
     print("="*100)
     
     # -------------------------------------------------------------------------
     # Section 1: Request Summary
     # -------------------------------------------------------------------------
-    print("\n📊 REQUEST SUMMARY")
+    print("\nREQUEST SUMMARY")
     print("-" * 100)
     
     total_requests = len(all_requests)
@@ -349,9 +349,9 @@ def on_test_stop(environment, **kwargs):
     failed = len([r for r in all_requests if not r["success"]])
     
     print(f"\n   Total requests made:         {total_requests}")
-    print(f"   ✅ Successful (got LLM output): {successful}")
-    print(f"   ❌ Failed/Empty response:       {failed}")
-    print(f"   ⚠️  Empty response warnings:     {len(metrics.empty_responses)}")
+    print(f"   [SUCCESS] Successful (got LLM output): {successful}")
+    print(f"   [FAIL] Failed/Empty response:       {failed}")
+    print(f"   [WARN] Empty response warnings:     {len(metrics.empty_responses)}")
     print(f"   Peak concurrent requests:    {metrics.peak_concurrent}")
     
     success_rate = (successful / total_requests * 100) if total_requests > 0 else 0
@@ -361,7 +361,7 @@ def on_test_stop(environment, **kwargs):
     # Section 2: Response Time Analysis
     # -------------------------------------------------------------------------
     if successful_requests:
-        print("\n\n⏱️  RESPONSE TIME ANALYSIS")
+        print("\n\nRESPONSE TIME ANALYSIS")
         print("-" * 100)
         
         response_times = [r["elapsed"] for r in successful_requests]
@@ -402,11 +402,11 @@ def on_test_stop(environment, **kwargs):
     # -------------------------------------------------------------------------
     # Section 3: TRUE Parallelism Verification
     # -------------------------------------------------------------------------
-    print("\n\n🔄 TRUE PARALLELISM VERIFICATION")
+    print("\n\nTRUE PARALLELISM VERIFICATION")
     print("-" * 100)
     
     if len(all_requests) < 2:
-        print("\n   ⚠️  Not enough requests to verify parallelism")
+        print("\n   [WARN] Not enough requests to verify parallelism")
     else:
         overlapping_pairs = find_overlapping_requests(all_requests)
         parallelism_score = calculate_parallelism_score(all_requests)
@@ -425,26 +425,26 @@ def on_test_stop(environment, **kwargs):
     # -------------------------------------------------------------------------
     # Section 4: The KEY Test - All Requests Generated
     # -------------------------------------------------------------------------
-    print("\n\n🎯 KEY TEST: DID ALL REQUESTS GET LLM GENERATION?")
+    print("\n\nKEY TEST: DID ALL REQUESTS GET LLM GENERATION?")
     print("-" * 100)
     
     fully_gen, partial, failed_gen = verify_all_requests_generated(all_requests)
     
-    print(f"\n   ✅ Fully generated (>20 chars):  {fully_gen}")
-    print(f"   ⚠️  Partial/short response:       {partial}")
-    print(f"   ❌ Failed/no generation:          {failed_gen}")
+    print(f"\n   [PASS] Fully generated (>20 chars):  {fully_gen}")
+    print(f"   [WARN] Partial/short response:       {partial}")
+    print(f"   [FAIL] Failed/no generation:          {failed_gen}")
     
     if fully_gen == total_requests:
-        print(f"\n   ✓ ALL {total_requests} REQUESTS GOT VALID LLM OUTPUT!")
+        print(f"\n   [PASS] ALL {total_requests} REQUESTS GOT VALID LLM OUTPUT!")
     elif fully_gen > 0:
-        print(f"\n   ⚠ Only {fully_gen}/{total_requests} requests got valid LLM output")
+        print(f"\n   [WARN] Only {fully_gen}/{total_requests} requests got valid LLM output")
     else:
-        print(f"\n   ✗ NO REQUESTS got valid LLM output!")
+        print(f"\n   [FAIL] NO REQUESTS got valid LLM output!")
     
     # -------------------------------------------------------------------------
     # Section 5: Sample Outputs (proof of generation)
     # -------------------------------------------------------------------------
-    print("\n\n📝 SAMPLE GENERATED OUTPUTS (Proof of LLM Generation)")
+    print("\n\nSAMPLE GENERATED OUTPUTS (Proof of LLM Generation)")
     print("-" * 100)
     
     sample_count = min(5, len(successful_requests))
@@ -457,7 +457,7 @@ def on_test_stop(environment, **kwargs):
     # Section 6: Throughput Analysis
     # -------------------------------------------------------------------------
     if all_requests:
-        print("\n\n⚡ THROUGHPUT ANALYSIS")
+        print("\n\nTHROUGHPUT ANALYSIS")
         print("-" * 100)
         
         test_start = min(r["start_time"] for r in all_requests)
@@ -482,7 +482,7 @@ def on_test_stop(environment, **kwargs):
     # Section 7: Final Verdict
     # -------------------------------------------------------------------------
     print("\n\n" + "="*100)
-    print(" " * 35 + "🏆 FINAL VERDICT 🏆")
+    print(" " * 35 + "FINAL VERDICT")
     print("="*100)
     
     # Calculate overall parallelism quality
@@ -504,28 +504,28 @@ def on_test_stop(environment, **kwargs):
         parallelism_score = calculate_parallelism_score(all_requests) if len(all_requests) >= 2 else 0
         
         if parallelism_score >= 50 and fully_gen == total_requests:
-            print("\n   ✅ TRUE PARALLEL PROCESSING CONFIRMED!")
+            print("\n   [PASS] TRUE PARALLEL PROCESSING CONFIRMED!")
             print("   All concurrent requests received valid LLM-generated responses.")
             print("   The server is correctly handling parallel inference.")
         elif parallelism_score >= 20:
-            print("\n   ⚠️  PARTIAL PARALLELISM DETECTED")
+            print("\n   [WARN] PARTIAL PARALLELISM DETECTED")
             print("   Some parallel processing occurred, but not at full capacity.")
             print("   Consider sending more concurrent requests or checking --parallel setting.")
         else:
-            print("\n   ⚠️  LIMITED PARALLELISM")
+            print("\n   [WARN] LIMITED PARALLELISM")
             print("   Requests were processed mostly sequentially.")
             print("   Check if LLAMA_ARG_N_PARALLEL is set correctly in your config.")
     else:
-        print("\n   ❌ PARALLELISM ISSUES DETECTED:")
+        print("\n   [FAIL] PARALLELISM ISSUES DETECTED:")
         for issue in issues:
-            print(f"      • {issue}")
+            print(f"      - {issue}")
         print("\n   Recommendations:")
-        print("      • Ensure LLAMA_ARG_N_PARALLEL=4 or higher in compose.yaml")
-        print("      • Check server logs for errors")
-        print("      • Increase concurrent users: locust -u 8 or higher")
+        print("      - Ensure LLAMA_ARG_N_PARALLEL=4 or higher in compose.yaml")
+        print("      - Check server logs for errors")
+        print("      - Increase concurrent users: locust -u 8 or higher")
     
     print("\n" + "="*100)
-    print("\n💡 Run command: locust -f LOCUST_llama-server_docker_inf.py --headless -u 8 -r 2 -t 60s")
+    print("\nRUN COMMAND: locust -f LOCUST_llama-server_docker_inf.py --headless -u 8 -r 2 -t 60s")
     print("="*100 + "\n")
 
 
