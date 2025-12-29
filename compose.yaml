@@ -1,5 +1,5 @@
 services:
-  llm-server:
+  llama-cpp-server:
     ports:
       - "8080:8080"
 
@@ -77,7 +77,7 @@ services:
     restart: unless-stopped
     # Note: Deployment resources are defined in the MODE blocks above
 
-  monitor:
+  metrics-monitor:
     image: python:3.9-slim
     volumes:
       - ./logs:/logs
@@ -85,13 +85,28 @@ services:
     working_dir: /app
     command: sh -c "pip install requests && python monitor.py"
     depends_on:
-      - llm-server
+      - llama-cpp-server
     restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: "0.2"
           memory: 128M
+
+  llm-service-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.llm_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/logs
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLAMA_CPP_ENDPOINT=http://llama-cpp-server:8080/v1
+    depends_on:
+      - llama-cpp-server
+    restart: unless-stopped
 
 volumes:
   models:

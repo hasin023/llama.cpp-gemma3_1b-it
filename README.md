@@ -310,6 +310,23 @@ Use the included Locust script for load verification.
 locust -f LOCUST_llama-server_docker_inf.py --headless -u 50 -r 17 -t 120s --host http://localhost:8080
 ```
 
+### Test Scripts
+
+The repository includes several test scripts in the `scripts/` directory:
+
+- **`docker_llm-api-service_inference.py`**: Tests the LLM Service API wrapper (conversation management)
+- **`llama-server_docker_inf.py`**: Tests direct llama.cpp server using completions API
+- **`llama-server_docker_inf_chat.py`**: Tests direct llama.cpp server using chat completions API
+
+Example usage:
+```bash
+# Test the LLM Service API
+python scripts/docker_llm-api-service_inference.py
+
+# Test direct llama.cpp server
+python scripts/llama-server_docker_inf.py
+```
+
 ## Interactive Survey CLI
 
 To interact with the LLM survey agent using a turn-by-turn CLI tool, use `survey_cli.py`. This tool manages conversation history and provides pre-defined survey templates.
@@ -357,3 +374,34 @@ python survey_cli.py custom
 - **Automatic History:** Manages the conversation turns ("user", "model") automatically.
 - **Rich Output:** Uses colored text and spinners for a better user experience.
 - **Bengali Support:** Configured to display Bengali script correctly in Windows terminals.
+
+## Documentation
+
+- **[README.md](README.md)**: Main documentation (this file)
+- **[LLM-SERVICE.md](LLM-SERVICE.md)**: LLM Service API documentation and voice integration guide
+- **[Benchmark.md](Benchmark.md)**: Performance benchmarks and resource analysis
+- **[docs/LlaMacppServer.md](docs/LlaMacppServer.md)**: Complete llama.cpp server reference (auto-generated)
+
+## Project Structure
+
+```
+.
+├── llm_service/              # LLM Service API wrapper (FastAPI)
+│   ├── main.py              # Service implementation
+│   └── requirements.txt     # Service dependencies
+├── scripts/                 # Test and utility scripts
+│   ├── docker_llm-api-service_inference.py
+│   ├── llama-server_docker_inf.py
+│   └── llama-server_docker_inf_chat.py
+├── docs/                    # Documentation
+│   └── LlaMacppServer.md    # llama.cpp server reference
+├── compose.yaml             # Docker Compose configuration
+├── Dockerfile.llm_service   # LLM Service container
+├── Dockerfile.server        # Custom llama.cpp server (optional)
+├── monitor.py               # Metrics monitoring service
+├── survey_cli.py            # Interactive survey CLI tool
+├── LOCUST_llama-server_docker_inf.py  # Load testing script
+├── Benchmark.md             # Performance benchmarks
+├── LLM-SERVICE.md           # Service API documentation
+└── README.md                # This file
+```
