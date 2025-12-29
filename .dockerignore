@@ -22,10 +22,9 @@ compose.yaml
 .env
 Dockerfile.server
 
-# Test scripts and utilities (not needed in image)
-scripts/
-monitor.py
-LOCUST_llama-server_docker_inf.py
+#! Exclude all of scripts/ except warmup.py (we need warmup.py in build context)
+scripts/*
+!scripts/warmup.py
 
 # Documentation (not needed in image)
 docs/

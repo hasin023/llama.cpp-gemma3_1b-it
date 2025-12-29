@@ -412,7 +412,6 @@ Maintain a consistent directory structure across the cluster:
 `/opt/llm-server/` containing:
 
 - `compose.yaml`
-- `monitor.py`
 - `models/` (Populated ideally via rsync or shared network storage mount to ensure model version consistency)
 
 ### 3. Ansible / SSH Deployment
@@ -615,7 +614,6 @@ In production, the STT and TTS components run in their own services; the LLM Ser
 ├── compose.yaml             # Docker Compose configuration
 ├── Dockerfile.llm_service   # LLM Service container
 ├── Dockerfile.server        # Custom llama.cpp server (optional)
-├── monitor.py               # Metrics monitoring helper (optional)
 ├── LOCUST_llama-server_docker_inf.py  # Load testing script
 ├── Benchmark.md             # Performance benchmarks
 ├── LLM-SERVICE.md           # Service API documentation
