@@ -1,7 +1,7 @@
 [project]
-name = "llama-cpp-gemma"
-version = "0.1.0"
-description = "Add your description here"
+name = "llm_service"
+version = "0.6.0"
+description = "Gemma3 1b, LLAMA.cpp server and llm_service API docker compose"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,5 +9,4 @@ dependencies = [
     "openai>=2.14.0",
     "python-dotenv>=1.2.1",
     "requests>=2.32.4",
-    "typer>=0.20.1",
 ]

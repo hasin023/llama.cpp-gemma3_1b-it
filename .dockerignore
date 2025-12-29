@@ -1,45 +1,53 @@
 # Git files
-
 .git
 .gitignore
 
 # Logs and temp files
-
 logs/
 models/
 *.gguf
 
-
 # Python cache and build artifacts
-
-**pycache**/
-_.pyc
-_.pyo
-\*.pyd
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .pytest_cache/
+*.egg-info/
+dist/
+build/
 
 # Docker-related (exclude compose/env to avoid baking secrets, but they're mounted as volumes anyway)
-
 compose.yaml
 .env
+Dockerfile.server
 
-# Test scripts (not needed in image)
+# Test scripts and utilities (not needed in image)
+scripts/
+monitor.py
+LOCUST_llama-server_docker_inf.py
 
-llama-server_docker_inf.py
-llama-server_docker_inf_chat.py
-LlaMacppServer.md
+# Documentation (not needed in image)
+docs/
+README.md
+Benchmark.md
+LLM-SERVICE.md
+*.md
+
+# Project configuration files (not needed in image)
+pyproject.toml
+requirements.txt
+uv.lock
 
 # Editor/IDE files
-
 .vscode/
 .idea/
-_.swp
-_.swo
+*.swp
+*.swo
 
 # Other common exclusions
-
-node*modules/
+node_modules/
 .venv/
 *.bak
-\_.DS_Store
+.DS_Store
 Thumbs.db

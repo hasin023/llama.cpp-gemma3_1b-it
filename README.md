@@ -476,54 +476,6 @@ python scripts/docker_llm-api-service_inference.py
 python scripts/llama-server_docker_inf.py
 ```
 
-## Interactive Survey CLI
-
-To interact with the LLM survey agent using a turn-by-turn CLI tool, use `survey_cli.py`. This tool manages conversation history and provides pre-defined survey templates.
-
-### Prerequisites
-
-Ensure you have installed the dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Usage
-
-**1. List Available Surveys**
-
-View all pre-defined survey templates (e.g., FrozenBerry, Healthcare, Banking).
-
-```bash
-python survey_cli.py list
-```
-
-**2. Start a Survey Chat**
-
-Start an interactive session with a specific survey template.
-
-```bash
-# Chat with the FrozenBerry product survey
-python survey_cli.py chat frozen-berry
-
-# Chat with the Student Life reflection survey
-python survey_cli.py chat student-life
-```
-
-**3. Custom Survey**
-
-Create your own survey on the fly by providing a context and a list of questions.
-
-```bash
-python survey_cli.py custom
-```
-
-### Features
-
-- **Automatic History:** Manages the conversation turns ("user", "model") automatically.
-- **Rich Output:** Uses colored text and spinners for a better user experience.
-- **Bengali Support:** Configured to display Bengali script correctly in Windows terminals.
-
 ## Documentation
 
 - **[README.md](README.md)**: Main documentation (this file)
@@ -547,8 +499,7 @@ python survey_cli.py custom
 ├── compose.yaml             # Docker Compose configuration
 ├── Dockerfile.llm_service   # LLM Service container
 ├── Dockerfile.server        # Custom llama.cpp server (optional)
-├── monitor.py               # Metrics monitoring service
-├── survey_cli.py            # Interactive survey CLI tool
+├── monitor.py               # Metrics monitoring helper (optional)
 ├── LOCUST_llama-server_docker_inf.py  # Load testing script
 ├── Benchmark.md             # Performance benchmarks
 ├── LLM-SERVICE.md           # Service API documentation

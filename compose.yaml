@@ -77,22 +77,6 @@ services:
     restart: unless-stopped
     # Note: Deployment resources are defined in the MODE blocks above
 
-  metrics-monitor:
-    image: python:3.9-slim
-    volumes:
-      - ./logs:/logs
-      - ./monitor.py:/app/monitor.py
-    working_dir: /app
-    command: sh -c "pip install requests && python monitor.py"
-    depends_on:
-      - llama-cpp-server
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.2"
-          memory: 128M
-
   llm-service-api:
     build:
       context: .
