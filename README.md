@@ -31,27 +31,175 @@ For edge deployments on devices like the Edge device (typically 2-8 GB RAM, ARMv
 
 ## Configuration Reference
 
-The system is tuned via environment variables in `compose.yaml`. The current configuration is optimized for a **2-Core Edge device**.
+The system is tuned via environment variables in `compose.yaml`. The current configuration is optimized for CPU-based inference on edge devices.
 
-### Configuration Parameters Reference
+### Environment Variables Explained
 
-| Parameter                      | Current Value | Description                                                  | Impact of Lowering Value                                                                         | Impact of Raising Value                                                                                                      |
-| :----------------------------- | :------------ | :----------------------------------------------------------- | :----------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------- |
-| `LLAMA_ARG_THREADS`            | `2`           | Number of threads used for token generation (inference).     | **Slower Generation:** Underutilizes CPU cores, reducing tokens-per-second.                      | **Context Switching:** On a 2-core device, raising this causes CPU contention and degrades performance.                      |
-| `LLAMA_ARG_THREADS_BATCH`      | `2`           | Number of threads used for prompt processing (batch).        | **Slower TTTF:** Increases Time To First Token as prompt evaluation takes longer.                | **Context Switching:** Similar to generation threads, excess threads cause contention on limited cores.                      |
-| `LLAMA_ARG_N_PARALLEL`         | `2`           | Number of concurrent requests (slots) the server can handle. | **Queueing:** Reduces concurrency; 3rd user must wait for a slot to free up.                     | **OOM Risk:** Each slot consumes significant RAM for KV Cache. Raising this may crash the container on low-RAM devices.      |
-| `LLAMA_ARG_BATCH`              | `256`         | Logical batch size for prompt processing.                    | **None/Minor:** May slightly reduce memory usage but increases prompt processing time.           | **Higher Memory:** Increases RAM usage significantly. Benefit diminishes if CPU cannot compute distinct batches fast enough. |
-| `LLAMA_ARG_UBATCH`             | `128`         | Physical batch size (micro-batch) for execution.             | **Latency:** May improve responsiveness/latency slightly but reduces total throughput.           | **Bus Saturation:** Larger ubatches choke the memory bandwidth of edge devices, increasing latency.                          |
-| `LLAMA_ARG_CTX_SIZE`           | `8192`        | Context window size (in tokens).                             | **Limited Context:** Model 'forgets' earlier conversation parts sooner. Saves RAM.               | **OOM Risk:** Memory usage scales linearly. Raising this often leads to Out Of Memory crashes on 2GB/4GB boards.             |
-| `LLAMA_ARG_CONT_BATCHING`      | `true`        | Enables continuous batching (dynamic scheduling).            | **Blocking:** Disabling this forces sequential processing, destroying multi-user performance.    | **N/A:** Boolean flag.                                                                                                       |
-| `LLAMA_ARG_ENDPOINT_METRICS`   | `1`           | Enables Prometheus metrics endpoint.                         | **Blindness:** Disables monitoring; cannot track cache usage or system load.                     | **N/A:** Boolean flag.                                                                                                       |
-| `LLAMA_ARG_SLEEP_IDLE_SECONDS` | `-1`          | Time until server sleeps when idle (-1 = disabled).          | **Power Saving:** Setting a positive value saves power but causes startup delay on next request. | **N/A:** Setting to -1 keeps server always ready.                                                                            |
-| `LLAMA_ARG_TEMP`               | `0.4`         | Temperature (randomness) of response.                        | **Rigid:** Responses become deterministic and repetitive. Good for factual queries.              | **Hallucination:** Responses become creative but prone to errors and incoherence.                                            |
-| `LLAMA_ARG_TOP_K`              | `20`          | Limits vocabulary to top K probable tokens.                  | **Focus:** Responses are very "safe" and predictable.                                            | **Diversity:** Responses effectively consider more vocabulary, increasing diversity but risk of nonsense.                    |
+This section provides detailed explanations of all environment variables used in `compose.yaml`, their purpose, and CPU-based recommendations.
 
-_Note: For 4-core devices, increase `LLAMA_ARG_THREADS`, `LLAMA_ARG_THREADS_BATCH`, and `LLAMA_ARG_N_PARALLEL` to 4, provided sufficient RAM is available._
+#### Model Loading & Source Configuration
 
-### Critical Warning: CPU Oversubscription
+| Variable            | Current Value          | Description                                                                                                                                                                      | CPU Recommendation                                                                                        |
+| ------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `HF_TOKEN`          | `${HF_TOKEN}`          | Hugging Face access token for downloading private models. Required only if accessing private repositories.                                                                       | Set this if you need to download private models. For public models, this can be omitted.                  |
+| `LLAMA_ARG_HF_REPO` | `${LLAMA_ARG_HF_REPO}` | Hugging Face repository path in format `<user>/<model>[:quant]`. The server automatically downloads the model on first launch. Quantization defaults to Q4_K_M if not specified. | Use this for automatic model management. Example: `hasin023/gemma3-1b-ft:Q4_K_M`                          |
+| `LLAMA_ARG_HF_FILE` | `${LLAMA_ARG_HF_FILE}` | Specific GGUF file name to download from the Hugging Face repo. Overrides the quant specified in `HF_REPO`.                                                                      | Use when you need a specific quantization (e.g., `gemma3-1b-ft-Q4_K_M.gguf`). Leave empty to use default. |
+| `LLAMA_CACHE`       | `/models`              | Directory path where downloaded models are cached. Models are stored here for reuse across container restarts.                                                                   | Set to a persistent volume mount (`./models:/models`) to avoid re-downloading models.                     |
+
+#### Network & Server Configuration
+
+| Variable                 | Current Value       | Description                                                                                                     | CPU Recommendation                                                                                                                                              |
+| ------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLAMA_ARG_HOST`         | `0.0.0.0`           | IP address the server binds to. `0.0.0.0` allows external connections; `127.0.0.1` restricts to localhost only. | Use `0.0.0.0` for edge deployments where clients connect over the network. Use `127.0.0.1` only for local testing.                                              |
+| `LLAMA_ARG_PORT`         | `${LLAMA_ARG_PORT}` | TCP port number for the HTTP server. Default is `8080` if not set.                                              | Standard port `8080` works well. Change if you have port conflicts. Ensure firewall rules allow this port.                                                      |
+| `LLAMA_ARG_THREADS_HTTP` | `-1`                | Number of threads dedicated to processing HTTP requests. `-1` means auto-detect based on CPU cores.             | **CPU Recommendation:** Keep at `-1` for automatic detection. For CPU-only deployments, this typically uses 1-2 threads, which is sufficient for HTTP handling. |
+
+#### CPU Threading Configuration
+
+| Variable                  | Current Value | Description                                                                                                                        | CPU Recommendation                                                                                                                                                                                               |
+| ------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLAMA_ARG_THREADS`       | `4`           | Number of CPU threads used for **token generation** (inference phase). Each thread processes tokens in parallel during generation. | **CPU Recommendation:** Set to match your physical CPU cores. For 2-core devices: `2`, for 4-core: `4`. Oversubscribing (e.g., 8 threads on 4 cores) causes context switching overhead and degrades performance. |
+| `LLAMA_ARG_THREADS_BATCH` | `4`           | Number of CPU threads used for **prompt processing** (batch evaluation phase). This affects Time-To-First-Token (TTFT).            | **CPU Recommendation:** Match `LLAMA_ARG_THREADS`. For CPU-only inference, prompt processing benefits from parallelization. Use same value as `THREADS` for balanced performance.                                |
+
+**Threading Best Practices for CPU:**
+
+- **2-Core Device:** `THREADS=2`, `THREADS_BATCH=2`
+- **4-Core Device:** `THREADS=4`, `THREADS_BATCH=4`
+- **8-Core Device:** `THREADS=8`, `THREADS_BATCH=8`
+- **Avoid:** Setting threads > physical cores (causes contention)
+
+#### Parallel Request Handling (Slots)
+
+| Variable               | Current Value | Description                                                                                                             | CPU Recommendation      |
+| ---------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `LLAMA_ARG_N_PARALLEL` | `1`           | Number of concurrent request **slots**. Each slot maintains its own KV cache and can process one request independently. | **CPU Recommendation:** |
+
+- **2-Core:** Start with `1-2` slots. Each slot consumes ~200-500MB RAM for KV cache.
+- **4-Core:** Can handle `2-4` slots depending on RAM availability.
+- **Memory Constraint:** Each slot = `CTX_SIZE × ~64 bytes` of RAM. With `CTX_SIZE=8192`, each slot needs ~512KB-1MB for KV cache.
+- **Trade-off:** More slots = better concurrency but higher memory usage. For CPU-only, `1-2` slots is often optimal to avoid memory pressure. |
+
+#### Batch Processing Configuration
+
+| Variable          | Current Value | Description                                                                                                                                                 | CPU Recommendation      |
+| ----------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `LLAMA_ARG_BATCH` | `512`         | **Logical batch size** - maximum number of tokens processed together during prompt evaluation. Larger batches improve throughput but increase memory usage. | **CPU Recommendation:** |
+
+- **2-Core/Low RAM:** `256-512` (current setting is good)
+- **4-Core/Medium RAM:** `512-1024`
+- **8-Core/High RAM:** `1024-2048`
+- **Memory Impact:** Each batch token consumes memory. Lower values reduce RAM usage but may slightly increase prompt processing time. |
+  | `LLAMA_ARG_UBATCH` | `256` | **Physical batch size** (micro-batch) - actual tokens processed per GPU/CPU operation. Smaller values improve latency but reduce throughput. | **CPU Recommendation:**
+- **Edge Devices:** `128-256` (current `256` is optimal)
+- **Desktop CPUs:** `256-512`
+- **Why Smaller:** CPU memory bandwidth is limited. Large ubatches saturate the memory bus, causing latency spikes. Smaller ubatches keep the pipeline flowing smoothly. |
+
+#### Context Window Configuration
+
+| Variable             | Current Value | Description                                                                                                  | CPU Recommendation      |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| `LLAMA_ARG_CTX_SIZE` | `8192`        | Maximum context window size in tokens. This determines how much conversation history the model can remember. | **CPU Recommendation:** |
+
+- **Low RAM (2GB):** `4096-6144` tokens
+- **Medium RAM (4GB):** `8192` tokens (current setting)
+- **High RAM (8GB+):** `16384` tokens
+- **Memory Formula:** Context memory ≈ `CTX_SIZE × 64 bytes × N_PARALLEL`. With `8192` and `N_PARALLEL=1`, expect ~512KB-1MB per slot.
+- **Trade-off:** Larger context = more memory but better conversation continuity. |
+
+#### Continuous Batching
+
+| Variable                  | Current Value | Description                                                                                                                                              | CPU Recommendation                                                                                                                                                                                  |
+| ------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLAMA_ARG_CONT_BATCHING` | `true`        | Enables **continuous batching** (dynamic batching). Allows the server to interleave token generation from multiple requests, maximizing CPU utilization. | **CPU Recommendation:** **Always enable (`true`)** for CPU-only deployments. This is critical for multi-user scenarios. Disabling forces sequential processing, which severely degrades throughput. |
+
+#### Logging & Monitoring
+
+| Variable                     | Current Value      | Description                                                                                                                 | CPU Recommendation                                                                                                                                                 |
+| ---------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LLAMA_LOG_TIMESTAMPS`       | `1`                | Adds timestamps to log messages. Useful for debugging and performance analysis.                                             | Enable (`1`) for production deployments to track request timing and debug issues.                                                                                  |
+| `LLAMA_ARG_VERBOSE`          | `0`                | Enables verbose logging that prints prompts and responses. `0` = disabled, `1` = enabled.                                   | **CPU Recommendation:** Keep at `0` for production (reduces I/O overhead). Set to `1` only for debugging. Verbose logging adds significant I/O load.               |
+| `LLAMA_LOG_VERBOSITY`        | `20`               | Log verbosity threshold. Values: `0`=generic, `1`=error, `2`=warning, `3`=info, `4`=debug. Higher values show more detail.  | **CPU Recommendation:** Use `3` (info) for production, `4` (debug) for troubleshooting. Value `20` seems incorrect - should be `0-4`.                              |
+| `LLAMA_LOG_FILE`             | `/logs/server.log` | File path where application logs are written. Must be a mounted volume for persistence.                                     | Ensure the `/logs` directory is mounted as a volume (`./logs:/logs`) to persist logs across container restarts.                                                    |
+| `LLAMA_ARG_ENDPOINT_METRICS` | `1`                | Enables Prometheus-compatible metrics endpoint at `/metrics`. Provides performance metrics (tokens/sec, cache usage, etc.). | **CPU Recommendation:** Enable (`1`) for monitoring. The metrics endpoint has minimal overhead and provides valuable insights into CPU utilization and throughput. |
+| `LLAMA_ARG_ENDPOINT_SLOTS`   | `1`                | Enables the `/slots` endpoint for monitoring active request slots and their status.                                         | Enable (`1`) to monitor slot utilization and debug request queuing issues.                                                                                         |
+
+#### Model Behavior (Sampling Parameters)
+
+| Variable                  | Current Value | Description                                                                                        | CPU Recommendation                                                                                           |
+| ------------------------- | ------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `LLAMA_ARG_CHAT_TEMPLATE` | `gemma`       | Chat template format. Must match your model's expected format (e.g., `gemma`, `llama3`, `chatml`). | Match this to your model. For Gemma models, use `gemma`. Check model documentation for the correct template. |
+| `LLAMA_ARG_N_PREDICT`     | `-1`          | Maximum tokens to generate. `-1` means unlimited (generates until EOS token or context limit).     | **CPU Recommendation:**                                                                                      |
+
+- **Chat Applications:** `-1` (unlimited) allows natural conversation flow
+- **API/Production:** Set a limit (e.g., `512`, `1024`) to prevent runaway generation and control costs
+- **Edge Devices:** Consider `256-512` to limit response time and memory usage |
+  | `LLAMA_ARG_TEMP` | `0.8` | **Temperature** - controls randomness. Lower = more deterministic, Higher = more creative. Range: `0.0` to `2.0`. | **CPU Recommendation:**
+- **Factual/Code:** `0.1-0.3` (deterministic)
+- **Creative Writing:** `0.7-0.9` (current `0.8` is good)
+- **Balanced:** `0.5-0.7`
+- **Note:** Lower temperature doesn't reduce CPU load, only affects output diversity. |
+  | `LLAMA_ARG_TOP_K` | `10` | **Top-K sampling** - limits vocabulary to the K most probable tokens. `0` = disabled (considers all tokens). | **CPU Recommendation:**
+- **Focused Responses:** `10-20` (current `10` is good for focused output)
+- **Balanced:** `40` (default)
+- **More Diverse:** `50-100`
+- **CPU Impact:** Lower values slightly reduce computation but have minimal performance impact. |
+  | `LLAMA_ARG_TOP_P` | `0.8` | **Nucleus sampling** - considers tokens with cumulative probability up to P. `1.0` = disabled. Works together with Top-K. | **CPU Recommendation:**
+- **Focused:** `0.7-0.8` (current `0.8` is good)
+- **Balanced:** `0.9` (default)
+- **More Diverse:** `0.95-1.0`
+- **Combined with Top-K:** Lower values create more focused, predictable responses. |
+  | `LLAMA_ARG_MIN_P` | `0.05` | **Min-P sampling** - minimum probability threshold relative to the most likely token. Filters out very low-probability tokens. | **CPU Recommendation:**
+- **Standard:** `0.05` (current setting, good default)
+- **Stricter:** `0.1` (more focused)
+- **Disabled:** `0.0`
+- **Purpose:** Prevents the model from considering extremely unlikely tokens, improving quality. |
+  | `LLAMA_ARG_REPEAT_PENALTY` | `1.1` | **Repetition penalty** - penalizes repeated token sequences. `1.0` = no penalty, `>1.0` = penalize repetition. | **CPU Recommendation:**
+- **Standard:** `1.1` (current setting, good default)
+- **More Creative:** `1.0` (no penalty)
+- **Less Repetitive:** `1.15-1.2`
+- **Note:** Higher values don't increase CPU load, only affect output quality. |
+
+#### Performance Optimizations
+
+| Variable         | Current Value | Description                                                                                                                                                | CPU Recommendation      |
+| ---------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `LLAMA_ARG_NUMA` | `distribute`  | NUMA (Non-Uniform Memory Access) optimization. Options: `distribute` (spread across nodes), `isolate` (local node only), `numactl` (use numactl settings). | **CPU Recommendation:** |
+
+- **Multi-Socket Systems:** Use `distribute` (current setting) to utilize all CPU sockets
+- **Single-Socket/Edge:** Can be omitted or set to `distribute` (harmless on single-socket systems)
+- **Note:** Most edge devices are single-socket, so this has minimal impact but doesn't hurt |
+  | `LLAMA_ARG_WARMUP` | `true` | Performs an empty inference run on startup to "warm up" the model and initialize caches. Reduces latency for the first request. | **CPU Recommendation:** **Always enable (`true`)**. The warmup cost is minimal (one empty inference) and significantly improves first-request latency. |
+  | `LLAMA_ARG_NO_WEBUI` | `true` | Disables the built-in web UI. Reduces memory footprint and startup time. | **CPU Recommendation:** Disable (`true`) for production/API deployments. Enable only if you need the web interface for testing. Saves ~10-20MB RAM. |
+  | `LLAMA_ARG_SLEEP_IDLE_SECONDS` | `-1` | Automatic sleep mode after idle period. `-1` = disabled (always ready). Positive value = seconds of idleness before sleeping. | **CPU Recommendation:**
+- **Production/Always-On:** `-1` (current setting, always ready)
+- **Power-Saving:** `300-600` (sleep after 5-10 minutes idle)
+- **Trade-off:** Sleep mode saves power but causes delay on next request (model reload time). For edge devices that need instant responses, keep at `-1`. |
+
+### CPU-Based Configuration Recommendations Summary
+
+#### For 2-Core Edge Devices (2GB-4GB RAM)
+
+LLAMA_ARG_THREADS=2
+LLAMA_ARG_THREADS_BATCH=2
+LLAMA_ARG_N_PARALLEL=1
+LLAMA_ARG_BATCH=512
+LLAMA_ARG_UBATCH=256
+LLAMA_ARG_CTX_SIZE=4096-6144
+LLAMA_ARG_CONT_BATCHING=true#### For 4-Core Edge Devices (4GB-8GB RAM)
+LLAMA_ARG_THREADS=4
+LLAMA_ARG_THREADS_BATCH=4
+LLAMA_ARG_N_PARALLEL=2
+LLAMA_ARG_BATCH=512-1024
+LLAMA_ARG_UBATCH=256
+LLAMA_ARG_CTX_SIZE=8192
+LLAMA_ARG_CONT_BATCHING=true#### For 8-Core Desktop CPUs (8GB+ RAM)
+LLAMA_ARG_THREADS=8
+LLAMA_ARG_THREADS_BATCH=8
+LLAMA_ARG_N_PARALLEL=4
+LLAMA_ARG_BATCH=1024-2048
+LLAMA_ARG_UBATCH=512
+LLAMA_ARG_CTX_SIZE=16384
+LLAMA_ARG_CONT_BATCHING=true### Critical Warning: CPU Oversubscription
 
 **Scenario:** Running multiple containers on a single edge device (e.g., 2 containers, each set to use all 4 cores).
 **Outcome:** Severe performance degradation.
@@ -319,6 +467,7 @@ The repository includes several test scripts in the `scripts/` directory:
 - **`llama-server_docker_inf_chat.py`**: Tests direct llama.cpp server using chat completions API
 
 Example usage:
+
 ```bash
 # Test the LLM Service API
 python scripts/docker_llm-api-service_inference.py
