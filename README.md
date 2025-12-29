@@ -353,7 +353,7 @@ The system implements a dual-layer logging strategy for audit and performance tr
 
 ### Application Logs
 
-Located at: `./logs/server.log`
+Located at: `./logs/llama_cpp_server.log`
 
 - Captures full verbosity input prompts and generated responses.
 - Includes token counts (prompt tokens vs. generated tokens) for billing/usage analysis.
@@ -475,6 +475,97 @@ python scripts/docker_llm-api-service_inference.py
 # Test direct llama.cpp server
 python scripts/llama-server_docker_inf.py
 ```
+
+## Voice Agent Orchestrator (Pseudocode)
+
+End-to-end voice pipeline:
+
+- **STT (Speech-to-Text)**: converts user audio → `user_query` text
+- **LLM Service (this project)**: builds Gemma survey prompt, maintains conversation turns, returns `generated_text`
+- **TTS (Text-to-Speech)**: converts `generated_text` → audio reply
+
+### Automatic Conversation Tracking (Recommended)
+
+The LLM Service automatically handles conversation continuity via **HTTP cookies**. Use `requests.Session()` to automatically manage cookies:
+
+```python
+import requests
+
+s = requests.Session()  # Session automatically handles cookies
+
+while True:
+    # 1. Get latest user utterance from STT
+    user_query = stt_transcribe_audio()  # returns text or None
+    if user_query is None:
+        break
+
+    # 2. Call LLM Service /query
+    # No need to manually track conversation_id - cookies handle it automatically!
+    payload = {
+        "survey_context": SURVEY_CONTEXT,
+        "questions": QUESTION_LIST,
+        "user_query": user_query,
+        "continue_in_same_conversation": True,
+        # conversation_id NOT needed - cookie from previous response is sent automatically
+    }
+
+    resp = s.post("http://localhost:8000/query", json=payload, timeout=30)
+    data = resp.json()
+
+    # 3. Get model reply (conversation_id is stored in cookie automatically)
+    model_reply = data["generated_text"]
+    conversation_id = data["conversation_id"]  # Optional: for logging/debugging only
+
+    # 4. Send model reply to TTS for playback
+    tts_play_audio(model_reply)
+```
+
+**How it works:**
+
+- First request: Service creates a new `conversation_id` and sets it as an HTTP cookie
+- Subsequent requests: `requests.Session()` automatically sends the cookie back
+- No manual tracking needed: The service maintains conversation history server-side
+
+### Manual Conversation Tracking (Alternative)
+
+If you cannot use cookies (e.g., stateless HTTP client, microservice architecture), you can explicitly pass `conversation_id`:
+
+```python
+conversation_id = None
+
+while True:
+    user_query = stt_transcribe_audio()
+    if user_query is None:
+        break
+
+    payload = {
+        "survey_context": SURVEY_CONTEXT,
+        "questions": QUESTION_LIST,
+        "user_query": user_query,
+        "continue_in_same_conversation": True,
+    }
+    if conversation_id:
+        payload["conversation_id"] = conversation_id  # Explicit ID for stateless clients
+
+    resp = requests.post("http://localhost:8000/query", json=payload, timeout=30)
+    data = resp.json()
+
+    conversation_id = data["conversation_id"]  # Must track this manually
+    model_reply = data["generated_text"]
+    tts_play_audio(model_reply)
+```
+
+**When to use manual tracking:**
+
+- Stateless HTTP clients that don't support cookies
+- Microservice architectures where cookies aren't shared
+- Custom HTTP clients that don't handle cookies
+
+**Recommendation:** Use automatic cookie-based tracking (Session approach) unless you have a specific reason not to. It's simpler and less error-prone.
+
+---
+
+In production, the STT and TTS components run in their own services; the LLM Service maintains conversation history in-memory using `conversation_id` (via cookies or explicit ID) to keep turns together.
 
 ## Documentation
 

@@ -33,7 +33,7 @@ Request (JSON):
   "survey_context": "string, required",
   "questions": ["string", "string", "..."],  // required, 1+ items
   "user_query": "string, optional",
-  "conversation_id": "string, optional",
+  "conversation_id": "string, optional",     // optional explicit ID for continuity
   "continue_in_same_conversation": true,     // default true
   "model": "gemma3_1b_400S_p77s16v20",
   "max_tokens": 512,
@@ -43,9 +43,12 @@ Request (JSON):
 
 Notes:
 - `survey_context` and `questions` are mandatory. The service will return 400 if missing/empty.
-- `conversation_id` controls continuity. If omitted:
-  - `continue_in_same_conversation=true` starts a new conversation and returns its ID.
-  - `continue_in_same_conversation=false` always starts a new conversation.
+- `conversation_id` controls continuity:
+  - If `continue_in_same_conversation=false` → a new conversation is always started.
+  - If `continue_in_same_conversation=true`:
+    - The service first looks at the explicit `conversation_id` field (if provided),
+    - Otherwise it falls back to the `conversation_id` HTTP cookie (for browser clients),
+    - If neither is present, a new conversation is started and its ID is returned.
 - `user_query` may be omitted to let the model produce the next survey question from the prompt.
 
 Response (JSON):
@@ -53,7 +56,12 @@ Response (JSON):
 {
   "conversation_id": "string",
   "generated_text": "string",
-  "inference_time": 1.23
+  "inference_time": 1.23,
+  "conversation": [
+    { "role": "model", "content": "…" },
+    { "role": "user",  "content": "…" },
+    { "role": "model", "content": "…" }
+  ]
 }
 ```
 
@@ -114,8 +122,20 @@ Content-Type: application/json
 }
 ```
 Notes on session handling:
-- The service manages `conversation_id` via an HTTP cookie. Clients do not need to send it explicitly.
-- Set `continue_in_same_conversation=false` to start a fresh conversation; the cookie will be updated automatically.
+
+**Automatic Cookie-Based Tracking (Recommended):**
+- The service automatically sets a `conversation_id` HTTP cookie on every response.
+- Use `requests.Session()` (Python) or any HTTP client that handles cookies automatically.
+- **No manual `conversation_id` tracking needed** - the cookie is sent back automatically on subsequent requests.
+- This is the simplest approach and works seamlessly for voice agent orchestrators.
+
+**Manual ID Tracking (Alternative):**
+- For stateless clients that don't support cookies, you can explicitly pass `conversation_id` in the request body.
+- Store `conversation_id` from each response and include it in the next request.
+- The service prioritizes explicit `conversation_id` over cookies if both are present.
+
+**Starting New Conversations:**
+- Set `continue_in_same_conversation=false` to start a fresh conversation, regardless of any previous ID or cookie.
 
 ## Error Cases
 - 400: Missing `survey_context` or `questions`, or empty `questions` list.
