@@ -54,7 +54,7 @@ def run_sequence():
     # This is the raw text from the LLM Service to send to TTS
     generated_text_1 = data1["generated_text"]
     print("Turn #1 - LLM text response:", generated_text_1)
-    print("Turn #1 - conversation_id:", data1.get("conversation_id"))
+    print("Turn #1 - conversation_id:", data1["conversation_id"])
 
     time.sleep(0.5)
 
@@ -77,7 +77,7 @@ def run_sequence():
 
     generated_text_2 = data2["generated_text"]
     print("Turn #2 - LLM text response:", generated_text_2)
-    print("Turn #2 - conversation_id:", data2.get("conversation_id"))
+    print("Turn #2 - conversation_id:", data2["conversation_id"])
 
     # ---- End total inference timer ----
     total_inference_time = time.perf_counter() - total_start_time

@@ -2,6 +2,17 @@ services:
   llama-cpp-server:
     ports:
       - "8080:8080"
+    healthcheck:
+      # Check health endpoint - try multiple methods for compatibility
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --tries=1 --spider http://localhost:8080/health 2>/dev/null || curl -f http://localhost:8080/health >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s # Give it time to load the model
 
     # === MODE A: CPU ONLY (DEFAULT) ===
     image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
@@ -88,9 +99,40 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLAMA_CPP_ENDPOINT=http://llama-cpp-server:8080/v1
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import requests; requests.get('http://localhost:8000/health').raise_for_status()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     depends_on:
-      - llama-cpp-server
+      llama-cpp-server:
+        condition: service_healthy
     restart: unless-stopped
+
+  warmup:
+    image: python:3.12-slim
+    volumes:
+      - ./scripts/warmup.py:/app/warmup.py
+    working_dir: /app
+    command: sh -c "pip install --no-cache-dir requests && python warmup.py"
+    depends_on:
+      llama-cpp-server:
+        condition: service_healthy
+      llm-service-api:
+        condition: service_started
+    restart: "no" # One-shot: run once and exit
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
 
 volumes:
   models:

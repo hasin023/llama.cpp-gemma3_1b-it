@@ -284,6 +284,30 @@ If the syntax is correct, start the containerized stack.
 docker compose up -d
 ```
 
+**What happens during startup:**
+
+1. **llama-cpp-server** starts and loads the model (this can take 30-60 seconds)
+2. **llm-service-api** waits for llama-cpp-server to be healthy, then starts
+3. **warmup** service automatically runs once:
+   - Waits for both services to be healthy
+   - Sends a minimal warmup request to `/query` endpoint
+   - Ensures the model is fully initialized and ready for real traffic
+   - Exits cleanly (one-shot container)
+
+You can monitor the warmup progress:
+
+```bash
+# Watch warmup logs
+docker compose logs -f warmup
+
+# Check all service status
+docker compose ps
+```
+
+The warmup service ensures your first real request won't experience cold-start latency. If warmup fails, the stack will still work, but the first request may be slower.
+
+**Note:** The warmup service is a one-shot container that runs once and exits. To disable it, comment out the `warmup:` service block in `compose.yaml`.
+
 ### 3. Verification
 
 Verify the service health and network accessibility.
@@ -584,7 +608,8 @@ In production, the STT and TTS components run in their own services; the LLM Ser
 ├── scripts/                 # Test and utility scripts
 │   ├── docker_llm-api-service_inference.py
 │   ├── llama-server_docker_inf.py
-│   └── llama-server_docker_inf_chat.py
+│   ├── llama-server_docker_inf_chat.py # Unused script, doesn't work for Gemma Chat Template
+│   └── warmup.py            # Automated warmup script (runs via Docker Compose)
 ├── docs/                    # Documentation
 │   └── LlaMacppServer.md    # llama.cpp server reference
 ├── compose.yaml             # Docker Compose configuration

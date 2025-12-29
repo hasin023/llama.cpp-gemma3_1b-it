@@ -136,3 +136,73 @@ _Constraint:_ No RAM Limit
 - **For 1GB RAM Devices (e.g., Orange Pi Zero 2):** STRICTLY use **Q4_K_M** or **Q5_K_M** quantization. Do not attempt Q8.
 - **For 2GB+ RAM Devices:** Q8 is viable but offers ~35% lower throughput than Q4. Use only if higher precision is strictly necessary for the application logic.
 - **Production Config:** Ensure `compose.yaml` memory limits always exceed `Model Size + (Context Size * 2 * Layers)` to prevent silent performance death due to swapping.
+
+### Inference Without the warmup request
+
+```bash
+llama.cpp-gemma> python .\scripts\docker_llm-api-service_inference.py
+Service healthy: {'status': 'ok'}
+Turn #1 - LLM text response: আপনি কি FrozenBerry ব্যবহার করেছেন?
+Turn #1 - conversation_id: bedd7dbd-7ee4-42c2-addb-0993bb1bd229
+
+Turn #2 - LLM text response: আচ্ছা, স্বাদ কেমন ছিল?
+Turn #2 - conversation_id: bedd7dbd-7ee4-42c2-addb-0993bb1bd229
+Total inference time (end-to-end): 6.89s
+```
+
+```bash
+llama.cpp-gemma> python .\scripts\docker_llm-api-service_inference.py
+Service healthy: {'status': 'ok'}
+Turn #1 - LLM text response: আপনি কি FrozenBerry ব্যবহার করেছেন?
+Turn #1 - conversation_id: ef27cd20-aa40-47f5-bc13-486c64f7ca57
+
+Turn #2 - LLM text response: আচ্ছা, স্বাদ কেমন লেগেছে?
+Turn #2 - conversation_id: ef27cd20-aa40-47f5-bc13-486c64f7ca57
+Total inference time (end-to-end): 2.33s
+```
+
+```bash
+llama.cpp-gemma> python .\scripts\docker_llm-api-service_inference.py
+Service healthy: {'status': 'ok'}
+Turn #1 - LLM text response: আপনি FrozenBerry কেন ব্যবহার করেন?
+Turn #1 - conversation_id: 5f0e7c08-1c2c-42d7-b903-3d53688229c4
+
+Turn #2 - LLM text response: আচ্ছা, স্বাদ কেমন লাগলো?
+Turn #2 - conversation_id: 5f0e7c08-1c2c-42d7-b903-3d53688229c4
+Total inference time (end-to-end): 2.36s
+```
+
+### Inference with the warmup request
+
+```bash
+PS C:\WORK\Vivasoft\llama.cpp-gemma> python .\scripts\docker_llm-api-service_inference.py
+Service healthy: {'status': 'ok'}
+Turn #1 - LLM text response: আপনি FrozenBerry ব্যবহার করেছেন?
+Turn #1 - conversation_id: c2ee32e7-c7f3-4287-b000-94dfca97a003
+
+Turn #2 - LLM text response: আচ্ছা, স্বাদ কেমন লাগলো?
+Turn #2 - conversation_id: c2ee32e7-c7f3-4287-b000-94dfca97a003
+Total inference time (end-to-end): 4.10s
+```
+
+```bash
+PS C:\WORK\Vivasoft\llama.cpp-gemma> python .\scripts\docker_llm-api-service_inference.py
+Service healthy: {'status': 'ok'}
+Turn #1 - LLM text response: আপনি কি FrozenBerry ব্যবহার করেছেন?
+Turn #1 - conversation_id: 03afd45e-c44a-434e-9c46-0cd8db2e13aa
+
+Turn #2 - LLM text response: আপনি কি FrozenBerry স্বাদ নিয়ে কোনো feedback দিতে চান?
+Turn #2 - conversation_id: 03afd45e-c44a-434e-9c46-0cd8db2e13aa
+Total inference time (end-to-end): 2.62s
+```
+
+```bash
+PS C:\WORK\Vivasoft\llama.cpp-gemma> python .\scripts\docker_llm-api-service_inference.py
+Service healthy: {'status': 'ok'}
+Turn #1 - LLM text response: আপনি FrozenBerry ব্যবহার করেছেন?
+Turn #1 - conversation_id: 7504b6f5-fe64-4c9a-bd61-fcfb0c35f4f1
+
+Turn #2 - LLM text response: আচ্ছা, স্বাদ কেমন লাগলো?
+Turn #2 - conversation_id: 7504b6f5-fe64-4c9a-bd61-fcfb0c35f4f1
+Total inference time (end-to-end): 2.03s
+```
