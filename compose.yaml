@@ -96,6 +96,7 @@ services:
       - "8000:8000"
     volumes:
       - ./logs:/logs
+      - ./llm_service:/app
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLAMA_CPP_ENDPOINT=http://llama-cpp-server:8080/v1
