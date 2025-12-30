@@ -11,15 +11,16 @@ Key Metrics Collected:
 4. Parallelism verification - for efficiency analysis
 
 Usage (LOCAL testing against local Docker stack):
-    locust -f  .\scripts\LOCUST_llm-service-api.py --headless -u 1 -r 1 -t 120s --host http://localhost:8000 --system-config "i5-8365U CPU"
+    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 120s --host http://localhost:8000 --system-config "i5-8365U CPU"
+    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 1800s --host http://localhost:8000 --system-config "Ryzen-5_3600_6-Core"
 
 Usage (REMOTE testing against RunPod/AWS VM):
     # Replace <VM_IP> with your RunPod/AWS public IP address
-    locust -f  .\scripts\LOCUST_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://<VM_IP>:8000
+    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://<VM_IP>:8000
 
     # Examples:
-    # RunPod:  locust -f  .\scripts\LOCUST_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://85.123.45.67:8000
-    # AWS:    locust -f  .\scripts\LOCUST_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://ec2-12-34-56-78.compute-1.amazonaws.com:8000
+    # RunPod:  python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://85.123.45.67:8000
+    # AWS:    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://ec2-12-34-56-78.compute-1.amazonaws.com:8000
 
 Note: All results (CSV, report) are saved to YOUR LOCAL machine in ./logs/
 """
@@ -358,10 +359,9 @@ PRICING_COMPUTE = {
     "RunPod 5090 (32GB VRAM)": 0.89,
     "RunPod A40 (48GB VRAM)": 0.40,
     "RunPod A100 (80GB VRAM)": 1.39,
-    "AWS c8g.xlarge (4vCPU)": 0.16,
-    "AWS c8g.2xlarge (8vCPU)": 0.32,
-    "AWS c8g.4xlarge (16vCPU)": 0.64,
-    "AWS c8g.8xlarge (32vCPU)": 1.28,
+    "AWS c8g.xlarge (4vCPU)": 0.1052,
+    "AWS c8g.2xlarge (8vCPU)": 0.2103,
+    "AWS c8g.4xlarge (16vCPU)": 0.4206,
 }
 
 # Disk Storage Costs ($/hr)
@@ -394,29 +394,51 @@ GEMINI_MODELS = {
 # REPORTING HELPERS
 # ============================================================================
 def log_section(printer, title):
-    printer("\n" + "="*100)
-    printer(" " * 25 + title)
-    printer("="*100)
+    printer("\n" + "="*80)
+    printer(f" {title.center(78)} ")
+    printer("="*80)
 
-def log_header(printer, system_config):
-    printer("\n" + "="*100)
-    printer(" " * 25 + "LLM SERVICE COST ANALYSIS REPORT")
-    printer(f" " * 25 + f"System: {system_config}")
-    printer("="*100)
+def log_header(printer, config):
+    """
+    Print the report header with all test configuration details.
+    
+    Args:
+        printer: Function to write output
+        config: Dictionary containing:
+            - system_config: System description
+            - model_name: Name of the model
+            - duration: Test duration in seconds
+            - users: Number of users
+            - spawn_rate: Spawn rate
+            - host: Target host
+    """
+    printer("\n" + "#"*80)
+    printer(f"# {'LLM SERVICE LOAD TEST & COST ANALYSIS REPORT':^76} #")
+    printer("#"*80)
+    
+    # 1. Test Configuration
+    printer(f"\n{' TEST CONFIGURATION ':=^80}")
+    printer(f"   Now:                        {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    printer(f"   System Config:              {config.get('system_config', 'Unknown')}")
+    printer(f"   Model Name:                 {config.get('model_name', 'Unknown')}")
+    printer(f"   Target Host:                {config.get('host', 'Unknown')}")
+    printer(f"   Test Duration:              {config.get('duration', 0):.2f} seconds")
+    printer(f"   Concurrent Users:           {config.get('users', 'N/A')}")
+    printer(f"   Spawn Rate:                 {config.get('spawn_rate', 'N/A')} users/sec")
+    printer("-" * 80)
 
 def log_request_summary(printer, total, successful, failed, peak_concurrent):
-    printer("\nREQUEST SUMMARY")
-    printer("-" * 100)
-    printer(f"\n   Total requests made:        {total}")
+    printer(f"\n{' REQUEST METRICS ':=^80}")
+    printer(f"   Total requests made:        {total}")
     printer(f"   ✓ Successful:               {successful}")
     printer(f"   ✗ Failed:                   {failed}")
     printer(f"   Peak concurrent requests:   {peak_concurrent}")
-    printer(f"\n   Success rate:               {(successful/total*100) if total else 0:.1f}%")
+    rate = (successful/total*100) if total else 0
+    printer(f"   Success rate:               {rate:.1f}%")
 
 def log_token_analysis(printer, metrics, successful):
-    printer("\nTOKEN ANALYSIS")
-    printer("-" * 100)
-    printer(f"\n   Total Prompt Tokens:        {metrics.total_prompt_tokens:,}")
+    printer(f"\n{' TOKEN ANALYSIS ':=^80}")
+    printer(f"   Total Prompt Tokens:        {metrics.total_prompt_tokens:,}")
     printer(f"   Total Completion Tokens:    {metrics.total_completion_tokens:,}")
     printer(f"   Total All Tokens:           {metrics.total_all_tokens:,}")
     
@@ -426,8 +448,7 @@ def log_token_analysis(printer, metrics, successful):
         printer(f"   Avg Total/Req:              {metrics.total_all_tokens / successful:.1f}")
 
 def log_timing_analysis(printer, successful_requests):
-    printer("\nTIMING ANALYSIS")
-    printer("-" * 100)
+    printer(f"\n{' LATENCY ANALYSIS ':=^80}")
     if not successful_requests:
         printer("   No successful requests to analyze.")
         return 0, 0
@@ -438,7 +459,7 @@ def log_timing_analysis(printer, successful_requests):
     total_inference = sum(inference_times) if inference_times else 0
     
     if inference_times:
-        printer(f"\n   Total Inference Time:       {total_inference:.2f}s")
+        printer(f"   Total Inference Time:       {total_inference:.2f}s")
         printer(f"   Average Inference Time:     {statistics.mean(inference_times):.3f}s")
         printer(f"   Median Inference Time:      {statistics.median(inference_times):.3f}s")
         printer(f"   Min Inference Time:         {min(inference_times):.3f}s")
@@ -456,16 +477,16 @@ def get_blended_api_price(model_name, total_prompts, total_gen, total):
         return 0.0
     return ((total_prompts * prices["input"]) + (total_gen * prices["output"])) / total
 
-def log_cost_analysis(printer, metrics, total_inference_time, successful):
-    printer("\nCOST ANALYSIS")
-    printer("-" * 100)
+def log_cost_analysis(printer, metrics, total_inference_time, successful, system_config):
+    printer(f"\n{' COST ANALYSIS ':=^80}")
     
     if successful == 0 or metrics.total_all_tokens == 0:
         printer("\n   Not enough data for cost calculation")
         return None
 
     # 1. API Benchmarks
-    printer("\n   [API BENCHMARKS - Blended Cost based on your Input/Output ratio]")
+    printer("\n   [API BENCHMARKS - Blended Cost based on I/O ratio]")
+    printer("-" * 80)
     
     baseline_price = 0.0
     requests_per_m = (successful / metrics.total_all_tokens * 1_000_000)
@@ -474,20 +495,55 @@ def log_cost_analysis(printer, metrics, total_inference_time, successful):
         blended = get_blended_api_price(model_name, metrics.total_prompt_tokens, metrics.total_completion_tokens, metrics.total_all_tokens)
         per_req = blended / requests_per_m
         
-        printer(f"   {model_name:<20}: ${blended:.4f} per 1M tokens | ${per_req:.6f} per request")
+        printer(f"   {model_name:<20}: ${blended:.4f}/1M tokens | ${per_req:.6f}/req")
         
         if model_name == "Gemini 2.5 Flash":
             baseline_price = blended
 
     printer("")
 
-    # 2. Self-Hosted Hardware Costs
-    printer("   Effective Cost per 1M Tokens (Compute + Disk):")
+    # 2. Actual System Cost (If config matches known hardware)
+    actual_system_cost = None
+    actual_system_name = None
+    matched_config = None
+    
+    # Simple substring match to find if system_config corresponds to a known pricing profile
+    for key in PRICING_COMPUTE.keys():
+        if key.lower() in system_config.lower() or system_config.lower() in key.lower():
+            matched_config = key
+            break
+            
+    if matched_config:
+        printer(f"\n   [ACTUAL SYSTEM PERFORMANCE: {matched_config}]")
+        printer("-" * 80)
+        
+        hourly_compute_rate = PRICING_COMPUTE[matched_config]
+        disk_cost = PRICING_STORAGE.get(matched_config, 0.0)
+        total_hourly = hourly_compute_rate + disk_cost
+        
+        actual_system_cost = calculate_effective_cost_per_million_tokens(
+            metrics.total_all_tokens, total_inference_time, total_hourly
+        )
+        actual_cost_per_req = (total_inference_time / 3600) * total_hourly / successful
+        
+        printer(f"   Effective Cost:             ${actual_system_cost:.4f} / 1M tokens")
+        printer(f"   Cost per Request:           ${actual_cost_per_req:.6f} / req")
+        printer(f"   Hardware Rate Used:         ${total_hourly:.4f}/hr")
+        actual_system_name = matched_config
+
+    # 3. Hypothetical Comparison
+    printer("\n   [HYPOTHETICAL COMPARISON (Projected costs for other hardware)]")
+    printer("   (Assumes they would perform identically to the current test run)")
+    printer("-" * 80)
     
     cheapest_cost = float('inf')
     cheapest_name = None
 
     for name, hourly_compute_rate in PRICING_COMPUTE.items():
+        # Skip the actual system in the hypothetical list to avoid redundancy, 
+        # unless we want to show it alongside others for comparison context.
+        # We'll keep it for context.
+        
         disk_cost = PRICING_STORAGE.get(name, 0.0)
         total_hourly = hourly_compute_rate + disk_cost
         
@@ -496,43 +552,32 @@ def log_cost_analysis(printer, metrics, total_inference_time, successful):
         )
         cost_per_req = (total_inference_time / 3600) * total_hourly / successful
         
-        # ROI Comparison
-        roi_text = ""
-        if baseline_price > 0:
-            roi_factor = cost_per_million / baseline_price
-            roi_text = f"({roi_factor:.1f}x Flash 2.5)"
-            
-        printer(f"\n   {name}:")
-        printer(f"      Compute: ${hourly_compute_rate:.2f}/hr + Disk: ${disk_cost:.4f}/hr")
-        printer(f"      ${cost_per_million:.4f} per 1M tokens {roi_text}")
-        printer(f"      ${cost_per_req:.6f} per request")
+        printer(f"   {name:<25}: ${cost_per_million:.4f}/1M tokens")
 
         if cost_per_million < cheapest_cost:
             cheapest_cost = cost_per_million
             cheapest_name = name
 
-    return cheapest_name, cheapest_cost, baseline_price
+    return cheapest_name, cheapest_cost, baseline_price, actual_system_name, actual_system_cost
 
 def log_throughput_summary(printer, all_requests, successful, metrics):
     if not all_requests: 
         return
 
-    printer("\nTHROUGHPUT SUMMARY")
-    printer("-" * 100)
+    printer(f"\n{' THROUGHPUT SUMMARY ':=^80}")
     
     test_start = min(r["start_time"] for r in all_requests)
     test_end = max(r["end_time"] for r in all_requests)
     duration = test_end - test_start
     
-    printer(f"\n   Test Duration:              {duration:.2f}s")
+    printer(f"   Test Duration:              {duration:.2f}s")
     if duration > 0:
         printer(f"   Requests Per Second:        {successful / duration:.2f}")
         if metrics.total_all_tokens > 0:
             printer(f"   Tokens Per Wall-Clock Sec:  {metrics.total_all_tokens / duration:.2f}")
 
 def export_csv_data(printer, successful_requests, system_config):
-    printer("\nEXPORTING DATA")
-    printer("-" * 100)
+    printer(f"\n{' EXPORTING DATA ':=^80}")
     
     # Sanitize system config for filename (replace non-alphanumeric with underscore)
     safe_config = "".join(c if c.isalnum() else "_" for c in system_config)
@@ -557,49 +602,52 @@ def export_csv_data(printer, successful_requests, system_config):
                     usage.get("completion_tokens", 0), usage.get("total_tokens", 0),
                     req["concurrent_at_start"], req["success"], req["status_code"], system_config
                 ])
-        printer(f"\n   ✓ Detailed results exported to: {csv_path.absolute()}")
+        printer(f"   ✓ Detailed results exported to: {csv_path.absolute()}")
     except Exception as e:
-        printer(f"\n   ✗ Failed to export CSV: {e}")
+        printer(f"   ✗ Failed to export CSV: {e}")
 
 def log_final_summary(printer, successful, total, metrics, total_inference_time):
-    printer("\n\n" + "="*100)
-    printer(" " * 35 + "SUMMARY")
-    printer("="*100)
+    printer(f"\n{' FINAL SUMMARY ':=^80}")
     
     if successful > 0 and metrics.total_all_tokens > 0:
         tps = metrics.total_all_tokens / total_inference_time if total_inference_time > 0 else 0
-        printer(f"""
-   Total Requests:        {successful} successful / {total} total
-   Total Tokens:          {metrics.total_all_tokens:,}
-   Total Inference Time:  {total_inference_time:.2f}s
-   Tokens/Second:         {tps:.2f}
-""")
+        printer(f"\n   Total Requests:        {successful} successful / {total} total")
+        printer(f"   Total Tokens:          {metrics.total_all_tokens:,}")
+        printer(f"   Total Inference Time:  {total_inference_time:.2f}s")
+        printer(f"   Tokens/Second:         {tps:.2f}\n")
 
-def log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, avg_tps):
-    printer("-" * 100)
-    printer("FINAL VERDICT & RECOMMENDATION")
-    printer("-" * 100)
+def log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, avg_tps, actual_system_name, actual_system_cost):
+    printer(f"\n{' VERDICT & RECOMMENDATION ':=^80}")
     
-    if not cheapest_name or baseline_price == 0:
+    if baseline_price == 0:
         printer("   Verdict unavailable (insufficient data).")
         return
 
-    printer(f"Scenario: Running at {avg_tps:.2f} Tokens/Sec (Avg)")
-    printer(f"          (Disclaimer: Comparative hardware costs assume this measured speed)\n")
+    printer(f"   Scenario: Running at {avg_tps:.2f} Tokens/Sec (Avg)")
     
-    printer(f"1. API Baseline (Gemini 2.5 Flash):  ${baseline_price:.4f} / 1M tokens")
-    printer(f"2. Best Self-Hosted Option:          ${cheapest_cost:.4f} / 1M tokens ({cheapest_name})\n")
+    printer(f"\n   1. API Baseline (Gemini 2.5 Flash):  ${baseline_price:.4f} / 1M tokens")
     
-    if cheapest_cost < baseline_price:
-        savings = (1 - (cheapest_cost / baseline_price)) * 100
-        printer(f"   VERDICT: SELF-HOSTING IS CHEAPER")
-        printer(f"   The '{cheapest_name}' is {savings:.1f}% CHEAPER than Gemini API.")
-        printer(f"   Condition: You must achieve > {avg_tps:.1f} TPS to maintain this efficiency.")
+    # Verdict Branch A: We tested a known system
+    if actual_system_name and actual_system_cost:
+        printer(f"   2. ACTUAL SYSTEM ({actual_system_name}):  ${actual_system_cost:.4f} / 1M tokens\n")
+        
+        if actual_system_cost < baseline_price:
+            savings = (1 - (actual_system_cost / baseline_price)) * 100
+            printer(f"   >>> VERDICT: SELF-HOSTING ON {actual_system_name} IS CHEAPER <<<")
+            printer(f"   Your setup is {savings:.1f}% CHEAPER than Gemini API.")
+        else:
+            extra_cost = ((actual_system_cost / baseline_price) - 1) * 100
+            printer(f"   >>> VERDICT: GEMINI API IS CHEAPER <<<")
+            printer(f"   Your setup ({actual_system_name}) is {extra_cost:.1f}% MORE EXPENSIVE.")
+            
+    # Verdict Branch B: Simulation / Unknown System
     else:
-        extra_cost = ((cheapest_cost / baseline_price) - 1) * 100
-        printer(f"   VERDICT: USE GEMINI API")
-        printer(f"   Self-hosting is {extra_cost:.1f}% MORE EXPENSIVE than Gemini API at this speed.")
-        printer(f"   To beat API pricing, you need faster inference time or cheaper hardware.")
+        printer(f"   2. Best Hypothetical Option:         ${cheapest_cost:.4f} / 1M tokens ({cheapest_name})\n")
+        if cheapest_cost < baseline_price:
+            printer(f"   >>> SIMULATION VERDICT: {cheapest_name} WOULD BE CHEAPER <<<")
+            printer(f"   (Assuming it achieves the same {avg_tps:.2f} TPS performance)")
+        else:
+             printer(f"   >>> SIMULATION VERDICT: API IS CHEAPER <<<")
 
 
 # ============================================================================
@@ -625,9 +673,29 @@ def on_test_stop(environment, **kwargs):
         with open(report_path, "a", encoding="utf-8") as f:
             f.write(msg + "\n")
 
+    # Gather extended config
+    test_start = min((r["start_time"] for r in all_requests), default=time.time())
+    test_end = max((r["end_time"] for r in all_requests), default=time.time())
+    duration = test_end - test_start
+    
+    # Try to find model name from successful requests
+    model_name = "Unknown"
+    for req in successful_requests:
+        if req.get("model_name") and req.get("model_name") != "unknown":
+            model_name = req.get("model_name")
+            break
+
+    config = {
+        "system_config": system_config,
+        "model_name": model_name,
+        "duration": duration,
+        "users": getattr(environment.parsed_options, 'num_users', "N/A"),
+        "spawn_rate": getattr(environment.parsed_options, 'spawn_rate', "N/A"),
+        "host": environment.host
+    }
     
     # 1. Header
-    log_header(printer, system_config)
+    log_header(printer, config)
     
     # 2. Request Summary
     log_request_summary(printer, len(all_requests), len(successful_requests), len(metrics.failed_requests), metrics.peak_concurrent)
@@ -640,10 +708,12 @@ def on_test_stop(environment, **kwargs):
     
     # 5. Cost Analysis
     cheapest_name, cheapest_cost, baseline_price = None, 0.0, 0.0
+    actual_system_name, actual_system_cost = None, None
+    
     if successful_requests:
-         result = log_cost_analysis(printer, metrics, total_inference_time, len(successful_requests))
+         result = log_cost_analysis(printer, metrics, total_inference_time, len(successful_requests), system_config)
          if result:
-             cheapest_name, cheapest_cost, baseline_price = result
+             cheapest_name, cheapest_cost, baseline_price, actual_system_name, actual_system_cost = result
 
     # 6. Throughput Summary
     log_throughput_summary(printer, all_requests, len(successful_requests), metrics)
@@ -655,9 +725,9 @@ def on_test_stop(environment, **kwargs):
     log_final_summary(printer, len(successful_requests), len(all_requests), metrics, total_inference_time)
     
     # 9. Final Verdict
-    if cheapest_name and baseline_price > 0:
+    if baseline_price > 0:
         tps = metrics.total_all_tokens / total_inference_time if total_inference_time else 0
-        log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, tps)
+        log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, tps, actual_system_name, actual_system_cost)
     
     printer(f"\n[INFO] Full report saved to: {report_path.absolute()}")
 

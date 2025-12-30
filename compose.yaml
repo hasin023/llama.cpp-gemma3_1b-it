@@ -22,9 +22,8 @@ services:
     # deploy:
     #   resources:
     #     limits:
-    #       cpus: "2"
-    #       memory: 1G # Standard (Q4/Q5 models)
-    # memory: 2G # Uncomment for Q8 models (Requires >1.5GB System RAM)
+    #       cpus: "4"
+    #       memory: 2G
     # ==================================
 
     # === MODE B: GPU ENABLED (Uncomment to enable) ===
@@ -68,7 +67,7 @@ services:
       # === LOGGING & MONITORING ===
       - LLAMA_LOG_TIMESTAMPS=1 # Enable timestamps in logs
       - LLAMA_ARG_VERBOSE=0 # Enable verbose logging (prompts, responses)
-      - LLAMA_LOG_VERBOSITY=20 # High verbosity for debugging
+      - LLAMA_LOG_VERBOSITY=0 # High verbosity for debugging
       - LLAMA_ARG_ENDPOINT_METRICS=1 # Enable Prometheus metrics endpoint
       - LLAMA_ARG_ENDPOINT_SLOTS=1 # Enable Slots endpoint for utilizing tracking
       - LLAMA_LOG_FILE=/logs/llama_cpp_server.log # CORRECT ENV VAR for log file
