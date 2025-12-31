@@ -711,7 +711,7 @@ def on_test_stop(environment, **kwargs):
     # Prepare log file
     safe_config = "".join(c if c.isalnum() else "_" for c in system_config)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = Path(f"./logs/report_summary_{safe_config}_{timestamp}.txt")
+    report_path = Path(f"./logs/report__{safe_config}_{timestamp}.txt")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Define a printer that writes to both stdout and the file
