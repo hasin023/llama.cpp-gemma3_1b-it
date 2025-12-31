@@ -168,7 +168,7 @@ def query(req: QueryRequest, request: Request, response: Response) -> QueryRespo
     In all cases, the effective `conversation_id` is returned in the response and
     also written to an HTTP cookie for browser-based clients.
     """
-    endpoint = os.getenv("LLAMA_CPP_ENDPOINT", "http://localhost:8080/v1")
+    endpoint = os.getenv("LLAMA_CPP_ENDPOINT", "http://llama-cpp-server:8080/v1")
     api_key = os.getenv("OPENAI_API_KEY", "sk-no-key-required")
     client = OpenAI(base_url=endpoint, api_key=api_key)
 

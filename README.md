@@ -596,6 +596,7 @@ In production, the STT and TTS components run in their own services; the LLM Ser
 - **[LLM-SERVICE.md](LLM-SERVICE.md)**: LLM Service API documentation and voice integration guide
 - **[Benchmark.md](Benchmark.md)**: Performance benchmarks and resource analysis
 - **[docs/LlaMacppServer.md](docs/LlaMacppServer.md)**: Complete llama.cpp server reference (auto-generated)
+- **[docs/AWS.md](docs/AWS.md)**: Guide for deploying and load testing on AWS EC2
 
 ## Project Structure
 
