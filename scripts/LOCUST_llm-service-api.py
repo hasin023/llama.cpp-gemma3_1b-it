@@ -11,16 +11,16 @@ Key Metrics Collected:
 4. Parallelism verification - for efficiency analysis
 
 Usage (LOCAL testing against local Docker stack):
-    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 120s --host http://localhost:8000 --system-config "i5-8365U CPU"
-    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 1800s --host http://localhost:8000 --system-config "Ryzen-5_3600_6-Core"
+    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 30s --host http://localhost --system-config "i5-8365U CPU"
+    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 30s --host http://localhost --system-config "Ryzen-5_3600_6-Core"
 
 Usage (REMOTE testing against RunPod/AWS VM):
     # Replace <VM_IP> with your RunPod/AWS public IP address
-    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://<VM_IP>:8000
+    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://<VM_IP>
 
     # Examples:
-    # RunPod:  python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://85.123.45.67:8000
-    # AWS:    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://ec2-12-34-56-78.compute-1.amazonaws.com:8000
+    # RunPod:  python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://85.123.45.67
+    # AWS:    python -m locust -f  .\scripts\locust_llm-service-api.py --headless -u 10 -r 5 -t 120s --host http://ec2-12-34-56-78.compute-1.amazonaws.com
 
 Note: All results (CSV, report) are saved to YOUR LOCAL machine in ./logs/
 """
@@ -138,7 +138,7 @@ class LLMServiceUser(HttpUser):
     1. Single-shot requests (for isolated cost measurement)
     2. Multi-turn conversations (for realistic voice agent simulation)
     """
-    host = "http://localhost:8000"
+    host = "http://localhost"
     wait_time = between(0.1, 0.5)  # Simulate realistic user delays
     
     def on_start(self):
@@ -305,13 +305,13 @@ class LLMServiceUser(HttpUser):
 # ============================================================================
 # COST CALCULATION FUNCTIONS
 # ============================================================================
-def calculate_effective_cost_per_million_tokens(total_tokens, total_inference_time, hourly_rate):
+def calculate_effective_cost_per_million_tokens(total_tokens, duration_seconds, hourly_rate):
     """
     Calculate the effective cost per 1M tokens for self-hosted hardware.
     
     Args:
         total_tokens: Total tokens processed during the test
-        total_inference_time: Total inference time in seconds
+        duration_seconds: Total wall-clock duration of the test in seconds
         hourly_rate: Cost of the hardware per hour (e.g., $0.79 for RunPod L40S)
         
     Returns:
@@ -320,8 +320,8 @@ def calculate_effective_cost_per_million_tokens(total_tokens, total_inference_ti
     if total_tokens == 0:
         return 0.0
     
-    # Time cost for processing these tokens
-    time_cost = (total_inference_time / 3600) * hourly_rate
+    # Time cost for processing these tokens (based on wall-clock time rented)
+    time_cost = (duration_seconds / 3600) * hourly_rate
     
     # Scale to 1 million tokens
     cost_per_million = (time_cost / total_tokens) * 1_000_000
@@ -365,17 +365,17 @@ PRICING_COMPUTE = {
 }
 
 # Disk Storage Costs ($/hr)
-# RunPod: $0.006/hr (20GB), AWS: ~$0.0022/hr (20GB gp3)
+# RunPod: $0.006/hr (20GB), AWS: ~$0.00333/hr (30GB gp3)
 PRICING_STORAGE = {
     "RunPod 3090 (24GB VRAM)": 0.006,
     "RunPod 4090 (24GB VRAM)": 0.006,
     "RunPod 5090 (32GB VRAM)": 0.006,
     "RunPod A40 (48GB VRAM)": 0.006,
     "RunPod A100 (80GB VRAM)": 0.006,
-    "AWS c8g.xlarge (4vCPU)": 0.0022,
-    "AWS c8g.2xlarge (8vCPU)": 0.0022,
-    "AWS c8g.4xlarge (16vCPU)": 0.0022,
-    "AWS c8g.8xlarge (32vCPU)": 0.0022,
+    "AWS c8g.xlarge (4vCPU)": 0.00333,
+    "AWS c8g.2xlarge (8vCPU)": 0.00333,
+    "AWS c8g.4xlarge (16vCPU)": 0.00333,
+    "AWS c8g.8xlarge (32vCPU)": 0.00333,
 }
 
 # Gemini API Pricing (Reference) - $/1M tokens
@@ -477,7 +477,7 @@ def get_blended_api_price(model_name, total_prompts, total_gen, total):
         return 0.0
     return ((total_prompts * prices["input"]) + (total_gen * prices["output"])) / total
 
-def log_cost_analysis(printer, metrics, total_inference_time, successful, system_config):
+def log_cost_analysis(printer, metrics, duration, successful, system_config):
     printer(f"\n{' COST ANALYSIS ':=^80}")
     
     if successful == 0 or metrics.total_all_tokens == 0:
@@ -522,9 +522,9 @@ def log_cost_analysis(printer, metrics, total_inference_time, successful, system
         total_hourly = hourly_compute_rate + disk_cost
         
         actual_system_cost = calculate_effective_cost_per_million_tokens(
-            metrics.total_all_tokens, total_inference_time, total_hourly
+            metrics.total_all_tokens, duration, total_hourly
         )
-        actual_cost_per_req = (total_inference_time / 3600) * total_hourly / successful
+        actual_cost_per_req = (duration / 3600) * total_hourly / successful
         
         printer(f"   Effective Cost:             ${actual_system_cost:.4f} / 1M tokens")
         printer(f"   Cost per Request:           ${actual_cost_per_req:.6f} / req")
@@ -548,9 +548,9 @@ def log_cost_analysis(printer, metrics, total_inference_time, successful, system
         total_hourly = hourly_compute_rate + disk_cost
         
         cost_per_million = calculate_effective_cost_per_million_tokens(
-            metrics.total_all_tokens, total_inference_time, total_hourly
+            metrics.total_all_tokens, duration, total_hourly
         )
-        cost_per_req = (total_inference_time / 3600) * total_hourly / successful
+        cost_per_req = (duration / 3600) * total_hourly / successful
         
         printer(f"   {name:<25}: ${cost_per_million:.4f}/1M tokens")
 
@@ -576,9 +576,7 @@ def log_throughput_summary(printer, all_requests, successful, metrics):
         if metrics.total_all_tokens > 0:
             printer(f"   Tokens Per Wall-Clock Sec:  {metrics.total_all_tokens / duration:.2f}")
 
-def export_csv_data(printer, successful_requests, system_config):
-    printer(f"\n{' EXPORTING DATA ':=^80}")
-    
+def export_csv_data(printer, successful_requests, system_config):    
     # Sanitize system config for filename (replace non-alphanumeric with underscore)
     safe_config = "".join(c if c.isalnum() else "_" for c in system_config)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -602,7 +600,7 @@ def export_csv_data(printer, successful_requests, system_config):
                     usage.get("completion_tokens", 0), usage.get("total_tokens", 0),
                     req["concurrent_at_start"], req["success"], req["status_code"], system_config
                 ])
-        printer(f"   ✓ Detailed results exported to: {csv_path.absolute()}")
+        printer(f"   ✓ Detailed results exported to CSV")
     except Exception as e:
         printer(f"   ✗ Failed to export CSV: {e}")
 
@@ -711,7 +709,7 @@ def on_test_stop(environment, **kwargs):
     actual_system_name, actual_system_cost = None, None
     
     if successful_requests:
-         result = log_cost_analysis(printer, metrics, total_inference_time, len(successful_requests), system_config)
+         result = log_cost_analysis(printer, metrics, duration, len(successful_requests), system_config)
          if result:
              cheapest_name, cheapest_cost, baseline_price, actual_system_name, actual_system_cost = result
 
@@ -729,7 +727,7 @@ def on_test_stop(environment, **kwargs):
         tps = metrics.total_all_tokens / total_inference_time if total_inference_time else 0
         log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, tps, actual_system_name, actual_system_cost)
     
-    printer(f"\n[INFO] Full report saved to: {report_path.absolute()}")
+    printer(f"\n[INFO] Full report saved")
 
 
 # Optional: Real-time progress updates

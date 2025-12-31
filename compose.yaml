@@ -1,7 +1,7 @@
 services:
   llama-cpp-server:
-    ports:
-      - "8080:8080"
+    # ports:
+    #   - "8080:8080" # Exposed only internally via Docker network
     healthcheck:
       # Check health endpoint - try multiple methods for compatibility
       test:
@@ -91,8 +91,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.llm_service
-    ports:
-      - "8000:8000"
+    # Ports removed for production security (accessed via Nginx)
+    # ports:
+    #   - "8000:8000"
     volumes:
       - ./logs:/logs
       - ./llm_service:/app
@@ -114,6 +115,17 @@ services:
     depends_on:
       llama-cpp-server:
         condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      llm-service-api:
+        condition: service_started
     restart: unless-stopped
 
   warmup:
