@@ -1,6 +1,7 @@
 # LLM Service (Survey Agent) — Setup & Voice Integration
 
 This service wraps your running `llama.cpp` server and exposes a minimal HTTP API to:
+
 - Build the Gemma-3 survey prompt (kept exactly as in your fine-tuning).
 - Manage conversation turns.
 - Run inference via the OpenAI-compatible endpoint of `llama.cpp`.
@@ -8,26 +9,31 @@ This service wraps your running `llama.cpp` server and exposes a minimal HTTP AP
 It is designed to plug into a voice pipeline: STT → LLM → TTS.
 
 ## Prerequisites
+
 - `docker` and `docker compose`
 - `OPENAI_API_KEY` (string; for llama.cpp you may use any non-empty value)
 - `LLAMA_ARG_*` configured in `compose.yaml` for the llama.cpp server
 - The fine-tuned Gemma-3 1B GGUF model available via HF or local
 
 ## Start the System
+
 1. Configure model source in `compose.yaml` for `llm-server` (HF repo/file or local `/models`).
 2. Start services:
    - `docker compose up -d`
 3. Verify:
-   - LLM llama.cpp server health: `curl http://localhost:8080/health`
-   - LLM service health: `curl http://localhost:8000/health`
+   - LLM llama.cpp server health: `curl http://localhost/health` (via Nginx)
+   - LLM service health: `curl http://localhost/health` (via Nginx)
 
 ## API (LLM Service)
-Base URL: `http://localhost:8000`
+
+Base URL: `http://localhost` (Port 80 via Nginx)
 
 ### POST /query
+
 Runs inference with the Gemma survey prompt and conversation control.
 
 Request (JSON):
+
 ```
 {
   "survey_context": "string, required",
@@ -42,6 +48,7 @@ Request (JSON):
 ```
 
 Notes:
+
 - `survey_context` and `questions` are mandatory. The service will return 400 if missing/empty.
 - `conversation_id` controls continuity:
   - If `continue_in_same_conversation=false` → a new conversation is always started.
@@ -52,6 +59,7 @@ Notes:
 - `user_query` may be omitted to let the model produce the next survey question from the prompt.
 
 Response (JSON):
+
 ```
 {
   "conversation_id": "string",
@@ -66,12 +74,15 @@ Response (JSON):
 ```
 
 ### Prompt Format
+
 The service uses the same Gemma-3 turn-based prompt you fine-tuned on:
+
 - Preserves `<start_of_turn>user ... <end_of_turn>` and `<start_of_turn>model`.
 - Appends conversation turns in order.
 - Does not alter the system prompt instructions.
 
 ## Voice Agent Integration
+
 Pipeline: STT → LLM Service → TTS
 
 1. STT captures user audio and produces `user_query` text.
@@ -83,8 +94,9 @@ Pipeline: STT → LLM Service → TTS
 4. Repeat per turn with the returned `conversation_id`.
 
 Example turn:
+
 ```
-POST http://localhost:8000/query
+POST http://localhost/query
 Content-Type: application/json
 
 {
@@ -97,7 +109,9 @@ Content-Type: application/json
   "continue_in_same_conversation": true
 }
 ```
+
 Response:
+
 ```
 {
   "conversation_id": "c6a8f4c1-...",
@@ -105,9 +119,11 @@ Response:
   "inference_time": 0.87
 }
 ```
+
 Next user turn:
+
 ```
-POST http://localhost:8000/query
+POST http://localhost/query
 Content-Type: application/json
 
 {
@@ -121,31 +137,38 @@ Content-Type: application/json
   "continue_in_same_conversation": true
 }
 ```
+
 Notes on session handling:
 
 **Automatic Cookie-Based Tracking (Recommended):**
+
 - The service automatically sets a `conversation_id` HTTP cookie on every response.
 - Use `requests.Session()` (Python) or any HTTP client that handles cookies automatically.
 - **No manual `conversation_id` tracking needed** - the cookie is sent back automatically on subsequent requests.
 - This is the simplest approach and works seamlessly for voice agent orchestrators.
 
 **Manual ID Tracking (Alternative):**
+
 - For stateless clients that don't support cookies, you can explicitly pass `conversation_id` in the request body.
 - Store `conversation_id` from each response and include it in the next request.
 - The service prioritizes explicit `conversation_id` over cookies if both are present.
 
 **Starting New Conversations:**
+
 - Set `continue_in_same_conversation=false` to start a fresh conversation, regardless of any previous ID or cookie.
 
 ## Error Cases
+
 - 400: Missing `survey_context` or `questions`, or empty `questions` list.
 - 502/504: LLM server unavailable or slow (check `llm-server` container).
 
 ## Performance & Scaling
+
 - Tune `LLAMA_ARG_THREADS`, `LLAMA_ARG_THREADS_BATCH`, `LLAMA_ARG_N_PARALLEL`, and batching in `llm-server` to match hardware.
 - Use your existing Locust script to stress the `llm-server` route `/v1/completions`. The llm-service forwards one request per call.
 
 ## File References
+
 - Service code: [`llm_service/main.py`](../llm_service/main.py)
 - Container: [`Dockerfile.llm_service`](../Dockerfile.llm_service)
 - Dependencies: [`llm_service/requirements.txt`](../llm_service/requirements.txt)
