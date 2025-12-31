@@ -4,7 +4,10 @@ This guide outlines the steps to deploy the LLM service on an AWS EC2 instance a
 
 ## 1. Setup AWS Instance
 
-- **Instance Type**: Select `c8g.xlarge` (graviton series) with `Ubuntu` OS.
+- **Name**: Example `llama-service-load-test`
+- **Region**: Select `us-east-1`
+- **Operation System**: Select `Ubuntu Server 24.04 LTS`
+- **Instance Type**: Select `c8g.xlarge` (graviton series).
 - **Storage**: Set storage to `30GB - gp3`.
 - **Key Pair**: Create a new key pair:
   - Type: `RSA`
@@ -13,7 +16,6 @@ This guide outlines the steps to deploy the LLM service on an AWS EC2 instance a
 - **Security Group**:
   - Allow **SSH (Port 22)** from `0.0.0.0/0`.
   - Allow **HTTP (Port 80)** from `0.0.0.0/0` (for application access).
-  - Allow **Port 8089** from `your-ip` (optional, for Locust GUI).
 
 ## 2. Connect to the Instance
 
