@@ -7,7 +7,7 @@ This guide outlines the steps to deploy the LLM service on an AWS EC2 instance a
 - **Name**: Example `llama-service-load-test`
 - **Region**: Select `us-east-1`
 - **Operation System**: Select `Ubuntu Server 24.04 LTS`
-- **Instance Type**: Select `c8g.xlarge` (graviton series).
+- **Instance Type**: Select `c8g.xlarge` (graviton4 series) or `t4g.xlarge` (graviton2 series).
 - **Storage**: Set storage to `30GB - gp3`.
 - **Key Pair**: Create a new key pair:
   - Type: `RSA`
