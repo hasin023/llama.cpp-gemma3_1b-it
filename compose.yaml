@@ -1,7 +1,7 @@
 services:
   llama-cpp-server:
-    ports:
-      - "8080:8080"
+    # ports:
+    #   - "8080:8080" # Exposed only internally via Docker network
     healthcheck:
       # Check health endpoint - try multiple methods for compatibility
       test:
@@ -22,9 +22,8 @@ services:
     # deploy:
     #   resources:
     #     limits:
-    #       cpus: "2"
-    #       memory: 1G # Standard (Q4/Q5 models)
-    # memory: 2G # Uncomment for Q8 models (Requires >1.5GB System RAM)
+    #       cpus: "4"
+    #       memory: 2G
     # ==================================
 
     # === MODE B: GPU ENABLED (Uncomment to enable) ===
@@ -68,7 +67,7 @@ services:
       # === LOGGING & MONITORING ===
       - LLAMA_LOG_TIMESTAMPS=1 # Enable timestamps in logs
       - LLAMA_ARG_VERBOSE=0 # Enable verbose logging (prompts, responses)
-      - LLAMA_LOG_VERBOSITY=20 # High verbosity for debugging
+      - LLAMA_LOG_VERBOSITY=0 # High verbosity for debugging
       - LLAMA_ARG_ENDPOINT_METRICS=1 # Enable Prometheus metrics endpoint
       - LLAMA_ARG_ENDPOINT_SLOTS=1 # Enable Slots endpoint for utilizing tracking
       - LLAMA_LOG_FILE=/logs/llama_cpp_server.log # CORRECT ENV VAR for log file
@@ -92,10 +91,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.llm_service
-    ports:
-      - "8000:8000"
+    # Ports removed for production security (accessed via Nginx)
+    # ports:
+    #   - "8000:8000"
     volumes:
       - ./logs:/logs
+      - ./llm_service:/app
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLAMA_CPP_ENDPOINT=http://llama-cpp-server:8080/v1
@@ -114,6 +115,17 @@ services:
     depends_on:
       llama-cpp-server:
         condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      llm-service-api:
+        condition: service_started
     restart: unless-stopped
 
   warmup:

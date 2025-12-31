@@ -141,6 +141,10 @@ class QueryResponse(BaseModel):
     generated_text: str
     inference_time: float
     conversation: List[Dict[str, str]]
+    # Add model name for tracking what model is actually running
+    model_name: Optional[str] = None
+    usage: Optional[Dict[str, int]] = None
+
 
 
 @app.get("/health")
@@ -249,10 +253,17 @@ def query(req: QueryRequest, request: Request, response: Response) -> QueryRespo
     generated_text = completion.choices[0].text
     CONVERSATIONS[cid].append({"role": "model", "content": generated_text})
 
+    usage = completion.usage
+    prompt_tokens = usage.prompt_tokens
+    completion_tokens = usage.completion_tokens
+    total_tokens = usage.total_tokens
+
     logger.info(
-        "Conversation %s | generated_tokens=%d (approx) | inference_time=%.2fs",
+        "Conversation %s | prompt_tokens=%d | completion_tokens=%d | total_tokens=%d | inference_time=%.2fs",
         cid,
-        len(generated_text.split()),
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
         end_time - start_time,
     )
 
@@ -269,5 +280,10 @@ def query(req: QueryRequest, request: Request, response: Response) -> QueryRespo
         generated_text=generated_text,
         inference_time=end_time - start_time,
         conversation=CONVERSATIONS[cid],
+        model_name=completion.model,  # Capture actual model used
+        usage={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        },
     )
-
