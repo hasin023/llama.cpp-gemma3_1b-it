@@ -1,19 +1,27 @@
-# Load Testing with Locust on RunPod
+# Load Testing with Locust on RunPod (Direct Execution)
 
-This guide outlines the steps to deploy the LLM service on a RunPod GPU instance and run load tests using Locust.
+This guide outlines the steps to deploy the LLM service on a RunPod GPU pod and run load tests using Locust **without Docker Compose**.
 
-## 1. Setup RunPod Instance
+> [!IMPORTANT]
+> RunPod Pods are containers, not VMs. Docker-in-Docker is not supported. This guide runs services directly inside the pod.
 
-- **Template**: Select `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04` which is Docker-ready template.
+## 1. Setup RunPod Pod
+
+- **Template**: Select `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
 - **GPU Selection**: Select a GPU based on your requirements (e.g., `RTX 3090`, `RTX 4090`, or `A40`).
-- **POD Name**: Example `llama-service-load-test`
+- **Pod Name**: Example `llama_service_loadtest`
 - **Disk Space**:
   - **Container Disk**: `20GB`
-  - **Volume Disk**: `30GB` (to store models and logs).
+  - **Volume Disk**: `30GB` (to store models)
 - **Expose Ports**:
-  - Ensure **Port 22** is exposed (for SSH).
-  - Ensure **Port 80** is mapped and exposed (for the application).
-  - Ensure **Port 8089** is mapped and exposed (if running Locust GUI from the pod) (optional).
+  - **Port 22** (SSH)
+  - **Port 8000** (llm_service API - **required for load testing**)
+- **Environment Variables** (set in RunPod Pod Configuration):
+  - `HF_TOKEN` - Your Hugging Face access token
+  - `HF_REPO` - Your model repository (e.g., `username/model-repo`)
+  - `HF_FILE` - Model file name (e.g., `gemma3-1b-ft-Q4_K_M.gguf`)
+  - `LLAMA_CPP_ENDPOINT` - `http://localhost:8080/v1` (default)
+  - `OPENAI_API_KEY` - `sk-no-key-required` (default)
 
 ## 2. Connect to the Pod
 
@@ -23,111 +31,185 @@ RunPod provides an SSH command string. It usually looks like this:
 ssh -p <port> root@<pod-ip> -i ~/.ssh/id_rsa
 ```
 
-### Tips for Connection:
-
-- **User**: Always `root` for standard RunPod templates.
-- **Port**: Note the specific port assigned by RunPod (e.g., `12345`).
-- **SSH Key**: Ensure your public key is added to your RunPod account settings before creating the pod.
-
 > [!TIP]
-> Use a terminal multiplexer like `tmux` or `screen` once connected to keep your session alive if the connection drops.
+> Use `tmux` or `screen` once connected to keep your session alive if the connection drops.
 
-## 3. Environment Setup
+---
 
-### Git Configuration (Private Repo Access)
+## 3. Git Configuration (Private Repo Access)
 
-Inside the pod, generate an SSH key if needed:
+Inside the pod, generate an SSH key:
 
 ```bash
 ssh-keygen -t ed25519 -C "your_email@example.com"
 ```
 
-Add the public key to your GitHub repository's **Deploy keys**.
-
-### Verify Docker Installation
-
-The recommended RunPod template (`runpod/pytorch`) comes with Docker pre-installed. You can simply verify it:
+Add the private key to the agent:
 
 ```bash
-docker --version
-docker compose version
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
 ```
 
-## 4. Application Deployment
-
-Clone the repository:
+View the public key:
 
 ```bash
-mkdir -p ~/workspace
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copy the output and add it to your GitHub repository's **Deploy keys** (Read-only access).
+
+Test the connection:
+
+```bash
+ssh -T git@github.com
+```
+
+---
+
+## 4. Build and Run llama.cpp Server
+
+### 4.1 Install Build Dependencies
+
+```bash
+apt update && apt install -y cmake build-essential libcurl4-openssl-dev
+```
+
+### 4.2 Clone and Build llama.cpp with CUDA
+
+```bash
+cd ~
+mkdir -p workspace && cd workspace
+
+git clone https://github.com/ggml-org/llama.cpp
+cd llama.cpp
+
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release -j $(nproc)
+```
+
+> [!NOTE]
+> The build may take 5-10 minutes. The `-j $(nproc)` flag uses all available CPU cores.
+
+### 4.3 Start the Server
+
+```bash
+cd ~/workspace/llama.cpp/build/bin
+
+./llama-server \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --hf-repo "$HF_REPO" \
+  --hf-file "$HF_FILE" \
+  --hf-token "$HF_TOKEN" \
+  --n-gpu-layers -1 \
+  --ctx-size 8192 \
+  --threads 4 \
+  --threads-batch 4 \
+  --batch-size 512 \
+  --ubatch-size 256 \
+  --n-parallel 1 \
+  --chat-template gemma \
+  --metrics \
+  --slots \
+  --warmup \
+  --no-webui
+```
+
+> [!TIP]
+> Run this inside a `tmux` session so it persists after you disconnect:
+>
+> ```bash
+> tmux new -s llama
+> # Run the command above
+> # Detach with Ctrl+B, then D
+> ```
+
+### 4.4 Verify Server is Running
+
+In another terminal (or tmux pane):
+
+```bash
+curl http://localhost:8080/health
+```
+
+Expected response: `{"status":"ok"}`
+
+---
+
+## 5. Run LLM Service (FastAPI Wrapper)
+
+### 5.1 Clone the Repository
+
+```bash
 cd ~/workspace
-git clone <your-repository-url>
-cd <repo-directory>
+git clone git@github.com:<your-username>/<your-repo>.git llm-app
+cd llm-app
 ```
 
-### Enable GPU Mode
-
-Before starting, modify `compose.yaml` to enable GPU acceleration if using a CUDA-enabled instance.
-
-1.  Open `compose.yaml`.
-2.  Uncomment the GPU-specific lines:
-    ```yaml
-    # === MODE B: GPU ENABLED ===
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    ```
-3.  Uncomment `LLAMA_ARG_N_GPU_LAYERS=-1` in the environment section to offload all layers to the GPU.
-
-### Start the Application
-
-If you have set the necessary environment variables (like `HF_TOKEN`) in the RunPod template or configuration, they will be automatically picked up. Otherwise, create a `.env` file:
+### 5.2 Install Dependencies
 
 ```bash
-cp .env.example .env
-# Edit .env and add your keys if not set in RunPod
-# nano .env
+cd llm_service
+pip install -r requirements.txt
 ```
 
-Start the service:
+### 5.3 Start the Service
 
 ```bash
-docker compose up --build -d
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Verify containers:
+> [!TIP]
+> Run this in a separate `tmux` session:
+>
+> ```bash
+> tmux new -s llm-service
+> uvicorn main:app --host 0.0.0.0 --port 8000
+> # Detach with Ctrl+B, then D
+> ```
+
+### 5.4 Verify Service is Running
 
 ```bash
-docker ps
+curl http://localhost:8000/health
 ```
 
-## 5. Load Testing
+Expected response: `{"status":"ok"}`
 
-### Run Locust (Headless Mode)
+---
 
-From your **local machine**, target the RunPod IP and mapped port:
+## 6. Load Testing (From Local Machine)
+
+Run Locust from your **local machine**, targeting the RunPod pod's public IP and port 8000.
+
+### 6.1 Find Your Pod's Public IP
+
+In the RunPod web console, find the pod's **Public IP** (or use the SSH connection hostname).
+
+### 6.2 Run Locust (Headless Mode)
 
 ```bash
-python -m locust -f .\scripts\locust_llm-service-api.py --headless -u 1 -r 1 -t 1800s --host http://<pod-ip> --system-config "RunPod A40"
+python -m locust -f .\scripts\LOCUST_llm-service-api.py --headless -u 1 -r 1 -t 1800s --host http://<pod-ip>:8000 --system-config "RunPod A40"
 ```
 
-### Run Locust (GUI Mode)
-
-If you have port 8089 mapped:
+### 6.3 Run Locust (GUI Mode)
 
 ```bash
-python -m locust -f .\scripts\locust_llm-service-api.py
+python -m locust -f .\scripts\LOCUST_llm-service-api.py
 ```
 
-- Access at `http://<pod-ip>:8089`
+Then open `http://localhost:8089` in your browser and set:
 
-## 6. Cleanup
+- **Host**: `http://<pod-ip>:8000`
+- **Number of users**: 1 (or more)
+- **Spawn rate**: 1
+
+---
+
+## 7. Cleanup
 
 To avoid unnecessary costs:
 
-1.  **Terminate** the pod from the RunPod console (this deletes the pod and container disk).
-2.  Alternatively, **Stop** the pod if you want to keep the Volume disk (you will still be charged for storage).
+1. **Terminate** the pod from the RunPod console (deletes the pod and container disk).
+2. Alternatively, **Stop** the pod to keep the Volume disk (you will still be charged for storage).
