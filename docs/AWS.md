@@ -10,6 +10,7 @@ This guide outlines the steps to deploy the LLM service on an AWS EC2 instance a
 - **Instance Type**: Select `c8g.xlarge` (graviton4 series) or `t4g.xlarge` (graviton2 series).
 - **Storage**: Set storage to `30GB - gp3`.
 - **Key Pair**: Create a new key pair:
+  - Name: `hasin-llama-key`
   - Type: `RSA`
   - Format: `pem`
   - This will download a `.pem` file. Keep it safe.
