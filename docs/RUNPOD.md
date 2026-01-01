@@ -130,7 +130,7 @@ cd ~/workspace/llama.cpp/build/bin
 In another terminal (or tmux pane):
 
 ```bash
-curl http://localhost:8080/health
+curl http://<pod-ip>:8080/health
 ```
 
 Expected response: `{"status":"ok"}`
@@ -143,7 +143,7 @@ Expected response: `{"status":"ok"}`
 
 ```bash
 cd ~/workspace
-git clone git@github.com:<your-username>/<your-repo>.git llm-app
+git clone git@github.com:<username>/<repo-name>.git llm-app
 cd llm-app
 ```
 
@@ -172,7 +172,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ### 5.4 Verify Service is Running
 
 ```bash
-curl http://localhost:8000/health
+curl http://<pod-ip>:8000/health
 ```
 
 Expected response: `{"status":"ok"}`

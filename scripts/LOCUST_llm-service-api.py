@@ -305,6 +305,13 @@ class LLMServiceUser(HttpUser):
 # ============================================================================
 # COST CALCULATION FUNCTIONS
 # ============================================================================
+def get_blended_api_price(model_name, total_prompts, total_gen, total):
+    """Calculate blended API price based on input/output ratio"""
+    prices = GEMINI_MODELS.get(model_name)
+    if not prices or total == 0:
+        return 0.0
+    return ((total_prompts * prices["input"]) + (total_gen * prices["output"])) / total
+
 def calculate_effective_cost_per_million_tokens(total_tokens, duration_seconds, hourly_rate):
     """
     Calculate the effective cost per 1M tokens for self-hosted hardware.
@@ -358,7 +365,6 @@ PRICING_COMPUTE = {
     "RunPod 4090 (24GB VRAM)": 0.59,
     "RunPod 5090 (32GB VRAM)": 0.89,
     "RunPod A40 (48GB VRAM)": 0.40,
-    "RunPod A100 (80GB VRAM)": 1.39,
     "AWS t4g.xlarge (4vCPU)": 0.0899,
     "AWS c8g.xlarge (4vCPU)": 0.1052,
     "AWS c8g.2xlarge (8vCPU)": 0.2103,
@@ -372,7 +378,6 @@ PRICING_STORAGE = {
     "RunPod 4090 (24GB VRAM)": 0.006,
     "RunPod 5090 (32GB VRAM)": 0.006,
     "RunPod A40 (48GB VRAM)": 0.006,
-    "RunPod A100 (80GB VRAM)": 0.006,
     "AWS t4g.xlarge (4vCPU)": 0.00333,
     "AWS c8g.xlarge (4vCPU)": 0.00333,
     "AWS c8g.2xlarge (8vCPU)": 0.00333,
@@ -390,138 +395,58 @@ GEMINI_MODELS = {
 
 
 # ============================================================================
-# REPORTING HELPERS
+# DATA CALCULATION HELPER
 # ============================================================================
-# ============================================================================
-# REPORTING HELPERS
-# ============================================================================
-def log_section(printer, title):
-    printer("\n" + "="*80)
-    printer(f" {title.center(78)} ")
-    printer("="*80)
-
-def log_header(printer, config):
+def calculate_cost_data(metrics, duration, successful, system_config):
     """
-    Print the report header with all test configuration details.
-    
-    Args:
-        printer: Function to write output
-        config: Dictionary containing:
-            - system_config: System description
-            - model_name: Name of the model
-            - duration: Test duration in seconds
-            - users: Number of users
-            - spawn_rate: Spawn rate
-            - host: Target host
+    Calculate all cost metrics and return a structured dictionary.
+    No printing happens here.
     """
-    printer("\n" + "="*80)
-    printer(f"| {'LLM SERVICE COST ANALYSIS REPORT':^76} |")
-    printer("="*80)
-    
-    # 1. Test Configuration
-    printer(f"\n{' TEST CONFIGURATION ':=^80}")
-    printer(f"   Report Generated:           {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z %z')}")
-    printer(f"   System Config:              {config.get('system_config', 'Unknown')}")
-    printer(f"   Model Name:                 {config.get('model_name', 'Unknown')}")
-    printer(f"   Target Host:                {config.get('host', 'Unknown')}")
-    printer(f"   Test Duration:              {config.get('duration', 0):.2f} seconds")
-    printer(f"   Concurrent Users:           {config.get('users', 'N/A')}")
-    printer(f"   Spawn Rate:                 {config.get('spawn_rate', 'N/A')} users/sec")
-    printer("-" * 80)
+    data = {
+        "sufficient_data": False,
+        "api_benchmarks": [],
+        "actual_system": None,
+        "hypothetical_comparisons": [],
+        "best_hypothetical": None,
+        "baseline_api": None,  # Will store Gemini 2.5 Flash data
+        "metrics": {
+            "total_requests": successful,
+            "total_tokens": metrics.total_all_tokens,
+            "duration": duration,
+            "requests_per_m_tokens": 0
+        }
+    }
 
-def log_request_summary(printer, total, successful, failed, peak_concurrent):
-    printer(f"\n{' REQUEST METRICS ':=^80}")
-    printer(f"   Total requests made:        {total}")
-    printer(f"   ✓ Successful:               {successful}")
-    printer(f"   ✗ Failed:                   {failed}")
-    printer(f"   Peak concurrent requests:   {peak_concurrent}")
-    rate = (successful/total*100) if total else 0
-    printer(f"   Success rate:               {rate:.1f}%")
-
-def log_token_analysis(printer, metrics, successful):
-    printer(f"\n{' TOKEN ANALYSIS ':=^80}")
-    printer(f"   Total Prompt Tokens:        {metrics.total_prompt_tokens:,}")
-    printer(f"   Total Completion Tokens:    {metrics.total_completion_tokens:,}")
-    printer(f"   Total All Tokens:           {metrics.total_all_tokens:,}")
-    
-    if successful > 0:
-        printer(f"\n   Avg Prompt/Req:             {metrics.total_prompt_tokens / successful:.1f}")
-        printer(f"   Avg Completion/Req:         {metrics.total_completion_tokens / successful:.1f}")
-        printer(f"   Avg Total/Req:              {metrics.total_all_tokens / successful:.1f}")
-
-def log_timing_analysis(printer, successful_requests):
-    printer(f"\n{' LATENCY ANALYSIS ':=^80}")
-    if not successful_requests:
-        printer("   No successful requests to analyze.")
-        return 0, 0
-
-    inference_times = [r["inference_time_reported"] for r in successful_requests if r.get("inference_time_reported", 0) > 0]
-    total_times = [r["elapsed_total"] for r in successful_requests]
-    
-    total_inference = sum(inference_times) if inference_times else 0
-    
-    if inference_times:
-        printer(f"   Total Inference Time:       {total_inference:.2f}s")
-        printer(f"   Average Inference Time:     {statistics.mean(inference_times):.3f}s")
-        printer(f"   Median Inference Time:      {statistics.median(inference_times):.3f}s")
-        printer(f"   Min Inference Time:         {min(inference_times):.3f}s")
-        printer(f"   Max Inference Time:         {max(inference_times):.3f}s")
-        
-        # Total elapsed
-        printer(f"\n   Avg Total Elapsed:          {statistics.mean(total_times):.3f}s")
-        
-    return total_inference, sum(total_times)
-
-def get_blended_api_price(model_name, total_prompts, total_gen, total):
-    """Calculate blended API price based on input/output ratio"""
-    prices = GEMINI_MODELS.get(model_name)
-    if not prices or total == 0:
-        return 0.0
-    return ((total_prompts * prices["input"]) + (total_gen * prices["output"])) / total
-
-def log_cost_analysis(printer, metrics, duration, successful, system_config):
-    printer(f"\n{' COST ANALYSIS ':=^80}")
-    
     if successful == 0 or metrics.total_all_tokens == 0:
-        printer("\n   Not enough data for cost calculation")
-        return None
+        return data
+
+    data["sufficient_data"] = True
+    requests_per_m = (successful / metrics.total_all_tokens * 1_000_000)
+    data["metrics"]["requests_per_m_tokens"] = requests_per_m
 
     # 1. API Benchmarks
-    printer("\n   [API BENCHMARKS - Blended Cost based on I/O ratio]")
-    printer("-" * 80)
-    
-    baseline_price = 0.0
-    baseline_per_req = 0.0
-    requests_per_m = (successful / metrics.total_all_tokens * 1_000_000)
-    
     for model_name in GEMINI_MODELS:
         blended = get_blended_api_price(model_name, metrics.total_prompt_tokens, metrics.total_completion_tokens, metrics.total_all_tokens)
         per_req = blended / requests_per_m
         
-        printer(f"   {model_name:<20}: ${blended:.4f}/1M tokens | ${per_req:.6f}/req")
+        entry = {
+            "name": model_name,
+            "cost_per_1m": blended,
+            "cost_per_req": per_req
+        }
+        data["api_benchmarks"].append(entry)
         
         if model_name == "Gemini 2.5 Flash":
-            baseline_price = blended
-            baseline_per_req = per_req
+            data["baseline_api"] = entry
 
-    printer("")
-
-    # 2. Actual System Cost (If config matches known hardware)
-    actual_system_cost = None
-    actual_cost_per_req = None
-    actual_system_name = None
+    # 2. Actual System Cost
     matched_config = None
-    
-    # Simple substring match to find if system_config corresponds to a known pricing profile
     for key in PRICING_COMPUTE.keys():
         if key.lower() in system_config.lower() or system_config.lower() in key.lower():
             matched_config = key
             break
             
     if matched_config:
-        printer(f"\n   [ACTUAL SYSTEM PERFORMANCE: {matched_config}]")
-        printer("-" * 80)
-        
         hourly_compute_rate = PRICING_COMPUTE[matched_config]
         disk_cost = PRICING_STORAGE.get(matched_config, 0.0)
         total_hourly = hourly_compute_rate + disk_cost
@@ -531,25 +456,17 @@ def log_cost_analysis(printer, metrics, duration, successful, system_config):
         )
         actual_cost_per_req = (duration / 3600) * total_hourly / successful
         
-        printer(f"   Effective Cost:             ${actual_system_cost:.4f} / 1M tokens")
-        printer(f"   Cost per Request:           ${actual_cost_per_req:.6f} / req")
-        printer(f"   Hardware Rate Used:         ${total_hourly:.4f}/hr")
-        actual_system_name = matched_config
+        data["actual_system"] = {
+            "name": matched_config,
+            "cost_per_1m": actual_system_cost,
+            "cost_per_req": actual_cost_per_req,
+            "hourly_rate": total_hourly
+        }
 
     # 3. Hypothetical Comparison
-    printer("\n   [HYPOTHETICAL COMPARISON (Projected costs for other hardware)]")
-    printer("   (Assumes they would perform identically to the current test run)")
-    printer("-" * 80)
-    
     cheapest_cost = float('inf')
-    cheapest_per_req = float('inf')
-    cheapest_name = None
-
+    
     for name, hourly_compute_rate in PRICING_COMPUTE.items():
-        # Skip the actual system in the hypothetical list to avoid redundancy, 
-        # unless we want to show it alongside others for comparison context.
-        # We'll keep it for context.
-        
         disk_cost = PRICING_STORAGE.get(name, 0.0)
         total_hourly = hourly_compute_rate + disk_cost
         
@@ -558,31 +475,203 @@ def log_cost_analysis(printer, metrics, duration, successful, system_config):
         )
         cost_per_req = (duration / 3600) * total_hourly / successful
         
-        printer(f"   {name:<25}: ${cost_per_million:.4f}/1M tokens | ${cost_per_req:.6f}/req")
+        entry = {
+            "name": name,
+            "cost_per_1m": cost_per_million,
+            "cost_per_req": cost_per_req
+        }
+        data["hypothetical_comparisons"].append(entry)
 
         if cost_per_million < cheapest_cost:
             cheapest_cost = cost_per_million
-            cheapest_per_req = cost_per_req
-            cheapest_name = name
+            data["best_hypothetical"] = entry
 
-    return cheapest_name, cheapest_cost, baseline_price, actual_system_name, actual_system_cost, baseline_per_req, cheapest_per_req, actual_cost_per_req
+    return data
 
-def log_throughput_summary(printer, all_requests, successful, metrics):
-    if not all_requests: 
-        return
 
-    printer(f"\n{' THROUGHPUT SUMMARY ':=^80}")
+# ============================================================================
+# REPORTING HELPERS (Markdown Format)
+# ============================================================================
+def print_professional_report(printer, config, metrics, cost_data, timing_data):
+    """
+    Generates a professional executive-style report.
+    Structure:
+    1. Executive Summary (Verdict & Savings)
+    2. Performance Snapshot (KPIs)
+    3. Detailed Cost Analysis
+    4. Technical Deep Dive (Latency, Tokens)
+    5. Test Metadata
+    """
     
-    test_start = min(r["start_time"] for r in all_requests)
-    test_end = max(r["end_time"] for r in all_requests)
-    duration = test_end - test_start
+    # -------------------------------------------------------------------------
+    # 1. EXECUTIVE SUMMARY & VERDICT
+    # -------------------------------------------------------------------------
+    printer("# LLM Service Cost Analysis Report\n")
+    printer(f"- **Test Date:** {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    printer(f"- **System:** {config.get('system_config', 'Unknown')}")
+    printer(f"- **Model:** {config.get('model_name', 'Unknown')}\n")
     
-    printer(f"   Test Duration:              {duration:.2f}s")
-    if duration > 0:
-        printer(f"   Requests Per Second:        {successful / duration:.2f}")
-        if metrics.total_all_tokens > 0:
-            printer(f"   Tokens Per Wall-Clock Sec:  {metrics.total_all_tokens / duration:.2f}")
+    printer("## 1. Executive Summary\n")
+    
+    if not cost_data["sufficient_data"] or not cost_data["baseline_api"]:
+        printer("> **Insufficient Data for Verdict**\n")
+    else:
+        baseline = cost_data["baseline_api"]
+        baseline_cost = baseline["cost_per_1m"]
+        
+        # Determine comparison target (Actual System OR Best Hypothetical)
+        target = cost_data["actual_system"] if cost_data["actual_system"] else cost_data["best_hypothetical"]
+        target_name = target["name"]
+        target_cost = target["cost_per_1m"]
+        is_simulation = cost_data["actual_system"] is None
 
+        # Calculate Savings/Cost
+        if target_cost < baseline_cost:
+            savings_pct = (1 - (target_cost / baseline_cost)) * 100
+            diff_per_1m = baseline_cost - target_cost
+            monthly_savings_proj = diff_per_1m * 5 # Projected for 5M tokens/month
+            
+            verdict_type = "SIMULATION VERDICT" if is_simulation else "VERDICT"
+            
+            printer(f"### {verdict_type}: SELF-HOSTING IS CHEAPER")
+            printer(f"**Recommendation:** Run on **{target_name}**")
+            printer(f"- **{savings_pct:.1f}% Savings** vs Gemini 2.5 Flash API")
+            printer(f"- Saves **${diff_per_1m:.2f}** per 1 Million tokens")
+            printer(f"- *Est. Monthly Savings (at 5M tokens/mo):* **${monthly_savings_proj:.2f}**\n")
+        
+        else:
+            extra_cost_pct = ((target_cost / baseline_cost) - 1) * 100
+            printer(f"### VERDICT: API IS CHEAPER")
+            printer(f"**Recommendation:** Use **Gemini 2.5 Flash API**")
+            printer(f"- Self-hosting on {target_name} is **{extra_cost_pct:.1f}% more expensive**")
+            printer(f"- API Cost: ${baseline_cost:.4f} / 1M tokens vs Self-Host: ${target_cost:.4f}\n")
+
+    # -------------------------------------------------------------------------
+    # 2. PERFORMANCE SNAPSHOT
+    # -------------------------------------------------------------------------
+    printer("## 2. Performance Snapshot\n")
+    
+    total_reqs = cost_data["metrics"]["total_requests"]
+    duration = cost_data["metrics"]["duration"]
+    
+    tps = cost_data["metrics"]["total_tokens"] / timing_data["total_inference_time"] if timing_data["total_inference_time"] > 0 else 0
+    avg_latency = timing_data["avg_inference"]
+    p50_latency = timing_data["p50_inference"]
+    
+    printer("| Key Metric | Value | Reference |")
+    printer("|------------|-------|-----------|")
+    printer(f"| **Throughput (TPS)** | **{tps:.2f}** tokens/s | Speed of generation |")
+    printer(f"| **Avg Latency** | {avg_latency:.2f} s | Time to first response |")
+    printer(f"| **Median Latency** | {p50_latency:.2f} s | Typical user wait time |")
+    printer(f"| **Request Rate** | {total_reqs/duration:.2f} req/s | System capacity |")
+    printer("")
+
+    # -------------------------------------------------------------------------
+    # 3. DETAILED COST ANALYSIS
+    # -------------------------------------------------------------------------
+    printer("## 3. Cost Analysis Comparison\n")
+    
+    if cost_data["sufficient_data"]:
+        printer("| Provider / System | Cost per 1M Tokens | Cost per Request |")
+        printer("|-------------------|--------------------|------------------|")
+        
+        # 1. API Line
+        b = cost_data["baseline_api"]
+        printer(f"| **Gemini 2.5 Flash** (Baseline) | **${b['cost_per_1m']:.4f}** | ${b['cost_per_req']:.6f} |")
+        
+        # 2. Actual System Line
+        if cost_data["actual_system"]:
+            a = cost_data["actual_system"]
+            printer(f"| **{a['name']}** (Actual) | **${a['cost_per_1m']:.4f}** | ${a['cost_per_req']:.6f} |")
+            
+        # 3. Best Hypothetical Line
+        actual_sys = cost_data.get("actual_system")
+        actual_name = actual_sys["name"] if actual_sys else None
+        
+        if cost_data["best_hypothetical"] and cost_data["best_hypothetical"]["name"] != actual_name:
+            h = cost_data["best_hypothetical"]
+            printer(f"| **{h['name']}** (Best Option) | **${h['cost_per_1m']:.4f}** | ${h['cost_per_req']:.6f} |")
+            
+        printer("")
+        
+        # Break Even Analysis
+        if cost_data["baseline_api"]:
+            target = cost_data["actual_system"] if cost_data["actual_system"] else cost_data["best_hypothetical"]
+            target_name = target["name"]
+            
+            # Recalculate fixed costs for break-even
+            target_hourly_rate = 0
+            if cost_data["actual_system"]:
+                target_hourly_rate = cost_data["actual_system"]["hourly_rate"]
+            else: 
+                # Re-fetch for simulation
+                base_rate = PRICING_COMPUTE.get(target_name, 0)
+                disk = PRICING_STORAGE.get(target_name, 0)
+                target_hourly_rate = base_rate + disk
+                
+            daily_fixed_cost = target_hourly_rate * 24
+            api_cost_per_token = cost_data["baseline_api"]["cost_per_1m"] / 1_000_000
+            
+            if api_cost_per_token > 0:
+                break_even_tokens = daily_fixed_cost / api_cost_per_token
+                break_even_reqs = daily_fixed_cost / cost_data["baseline_api"]["cost_per_req"]
+                
+                # Calculate hours needed based on TPS
+                tps = cost_data["metrics"]["total_tokens"] / timing_data["total_inference_time"] if timing_data["total_inference_time"] > 0 else 0
+                daily_hours_needed = 0
+                if tps > 0:
+                    daily_hours_needed = break_even_tokens / (tps * 3600)
+
+                printer(f"### Break-Even Point for {target_name}")
+                printer("> Activity level required to justify monthly fixed costs over paying per-token API fees.\n")
+                printer("| Metric | Daily Requirement | Monthly Requirement |")
+                printer("|--------|-------------------|---------------------|")
+                printer(f"| **Tokens Generated** | {break_even_tokens/1_000_000:.2f} M | {break_even_tokens*30/1_000_000:.2f} M |")
+                printer(f"| **Total Requests** | {break_even_reqs:,.0f} | {break_even_reqs*30:,.0f} |")
+                printer(f"| **Hours of Traffic** | {daily_hours_needed:.2f} hours | {daily_hours_needed*30:.2f} hours |")
+                printer("")
+
+    # -------------------------------------------------------------------------
+    # 4. TECHNICAL DEEP DIVE
+    # -------------------------------------------------------------------------
+    printer("## 4. Technical Deep Dive\n")
+    
+    printer("### Total Token Volume")
+    printer(f"- **Total Tokens:** {metrics.total_all_tokens:,}")
+    printer(f"- **Prompt Tokens:** {metrics.total_prompt_tokens:,}")
+    printer(f"- **Completion Tokens:** {metrics.total_completion_tokens:,}")
+    
+    total_reqs = cost_data["metrics"]["total_requests"]
+    if total_reqs > 0:
+        avg_prompt = metrics.total_prompt_tokens / total_reqs
+        avg_compl = metrics.total_completion_tokens / total_reqs
+        printer(f"- **Avg Context Window:** {avg_prompt:.0f} prompt + {avg_compl:.0f} completion = {avg_prompt+avg_compl:.0f} tokens/req\n")
+
+    printer("### Latency Distribution")
+    printer("| Metric | Time (s) |")
+    printer("|--------|----------|")
+    printer(f"| Min | {timing_data['min_inference']:.3f} |")
+    printer(f"| Median | {timing_data['p50_inference']:.3f} |")
+    printer(f"| Avg | {timing_data['avg_inference']:.3f} |")
+    printer(f"| Max | {timing_data['max_inference']:.3f} |")
+    printer("")
+
+    # -------------------------------------------------------------------------
+    # 5. TEST METADATA
+    # -------------------------------------------------------------------------
+    printer("## 5. Test Metadata\n")
+    printer("| Parameter | Value |")
+    printer("|-----------|-------|")
+    printer(f"| Timestamp | {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')} |")
+    printer(f"| Duration | {duration:.2f}s |")
+    printer(f"| Users | {config.get('users')} |")
+    printer(f"| Spawn Rate | {config.get('spawn_rate')} |")
+    printer(f"| Host | {config.get('host')} |")
+
+
+# ============================================================================
+# CSV EXPORT HELPER
+# ============================================================================
 def export_csv_data(printer, successful_requests, system_config):    
     # Sanitize system config for filename (replace non-alphanumeric with underscore)
     safe_config = "".join(c if c.isalnum() else "_" for c in system_config)
@@ -610,92 +699,6 @@ def export_csv_data(printer, successful_requests, system_config):
     except Exception as e:
         printer(f"   ✗ Failed to export CSV: {e}")
 
-def log_final_summary(printer, successful, total, metrics, total_inference_time):
-    printer(f"\n{' FINAL SUMMARY ':=^80}")
-    
-    if successful > 0 and metrics.total_all_tokens > 0:
-        tps = metrics.total_all_tokens / total_inference_time if total_inference_time > 0 else 0
-        printer(f"\n   Total Requests:        {successful} successful / {total} total")
-        printer(f"   Total Tokens:          {metrics.total_all_tokens:,}")
-        printer(f"   Total Inference Time:  {total_inference_time:.2f}s")
-        printer(f"   Tokens/Second:         {tps:.2f}\n")
-
-def log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, avg_tps, actual_system_name, actual_system_cost, baseline_per_req, cheapest_per_req, actual_cost_per_req):
-    printer(f"\n{' VERDICT & RECOMMENDATION ':=^80}")
-    
-    if baseline_price == 0:
-        printer("   Verdict unavailable (insufficient data).")
-        return
-
-    printer(f"   Scenario: Running at {avg_tps:.2f} Tokens/Sec (Avg)")
-    
-    printer(f"\n   1. API Baseline (Gemini 2.5 Flash):  ${baseline_price:.4f} / 1M tokens | ${baseline_per_req:.6f} / req")
-    
-    # Verdict Branch A: We tested a known system
-    if actual_system_name and actual_system_cost:
-        printer(f"   2. ACTUAL SYSTEM ({actual_system_name}):  ${actual_system_cost:.4f} / 1M tokens | ${actual_cost_per_req:.6f} / req\n")
-        
-        if actual_system_cost < baseline_price:
-            savings = (1 - (actual_system_cost / baseline_price)) * 100
-            printer(f"   >>> VERDICT: SELF-HOSTING ON {actual_system_name} IS CHEAPER <<<")
-            printer(f"   Your setup is {savings:.1f}% CHEAPER than Gemini API.")
-        else:
-            extra_cost = ((actual_system_cost / baseline_price) - 1) * 100
-            printer(f"   >>> VERDICT: GEMINI API IS CHEAPER <<<")
-            printer(f"   Your setup ({actual_system_name}) is {extra_cost:.1f}% MORE EXPENSIVE.")
-
-    # Verdict Branch B: Simulation / Unknown System
-    else:
-        printer(f"   2. Best Hypothetical Option:         ${cheapest_cost:.4f} / 1M tokens | ${cheapest_per_req:.6f} / req ({cheapest_name})\n")
-        
-        if cheapest_cost < baseline_price:
-            printer(f"   >>> SIMULATION VERDICT: {cheapest_name} WOULD BE CHEAPER <<<")
-            printer(f"   (Assuming it achieves the same {avg_tps:.2f} TPS performance)")
-        else:
-            printer(f"   >>> SIMULATION VERDICT: API IS CHEAPER <<<")
-
-
-    # ----------------------------------------------------------------------
-    # Universal Break-even Analysis (Runs for both matches and simulations)
-    # ----------------------------------------------------------------------
-    if baseline_price > 0:
-        # Determine which system we are analyzing
-        target_system_name = actual_system_name if (actual_system_name and actual_system_cost) else cheapest_name
-        
-        target_hourly_rate = 0
-        if actual_system_name and actual_system_cost:
-            target_hourly_rate = PRICING_COMPUTE.get(actual_system_name, 0) + PRICING_STORAGE.get(actual_system_name, 0)
-        else:
-            target_hourly_rate = PRICING_COMPUTE.get(cheapest_name, 0) + PRICING_STORAGE.get(cheapest_name, 0)
-
-        daily_fixed_cost = target_hourly_rate * 24
-        api_cost_per_token = baseline_price / 1_000_000
-        
-        if api_cost_per_token > 0:
-            break_even_tokens = daily_fixed_cost / api_cost_per_token
-            
-            # Calculate required utilization time (Hours/Day)
-            break_even_hours = 0
-            if avg_tps > 0:
-                break_even_hours = break_even_tokens / (avg_tps * 3600)
-
-            printer(f"\n   --------------------------------------------------------------------------------")
-            printer(f"   >>> BREAK-EVEN ANALYSIS: {target_system_name} <<<")
-            printer(f"   --------------------------------------------------------------------------------")
-            printer(f"   To justify self-hosting costs vs Gemini API, you need to process at least:")
-            printer(f"   • {break_even_tokens/1_000_000:,.2f} Million tokens / day")
-            
-            if baseline_per_req > 0:
-                    break_even_reqs = daily_fixed_cost / baseline_per_req
-                    printer(f"   • {break_even_reqs:,.0f} Requests / day")
-            
-            if break_even_hours > 0:
-                utilization_pct = (break_even_hours / 24) * 100
-                printer(f"   • {break_even_hours:.2f} Total hours of utilization / day ({utilization_pct:.1f}%)")
-            
-            printer("")
-
-
 
 # ============================================================================
 # MAIN REPORTING CONTROLLER
@@ -707,11 +710,23 @@ def on_test_stop(environment, **kwargs):
     system_config = environment.parsed_options.system_config
     all_requests = metrics.requests + metrics.failed_requests
     successful_requests = metrics.requests
+    
+    # 1. Gather Timing Data explicitly
+    inference_times = [r.get("inference_time_reported", 0) for r in successful_requests if r.get("inference_time_reported", 0) > 0]
+    total_inference_time = sum(inference_times)
+    
+    timing_data = {
+        "total_inference_time": total_inference_time,
+        "avg_inference": statistics.mean(inference_times) if inference_times else 0,
+        "p50_inference": statistics.median(inference_times) if inference_times else 0,
+        "min_inference": min(inference_times) if inference_times else 0,
+        "max_inference": max(inference_times) if inference_times else 0
+    }
 
     # Prepare log file
     safe_config = "".join(c if c.isalnum() else "_" for c in system_config)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = Path(f"./logs/report__{safe_config}_{timestamp}.txt")
+    report_path = Path(f"./logs/report__{safe_config}_{timestamp}.md")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Define a printer that writes to both stdout and the file
@@ -741,41 +756,15 @@ def on_test_stop(environment, **kwargs):
         "host": environment.host
     }
     
-    # 1. Header
-    log_header(printer, config)
+    # 2. Calculate Costs
+    cost_data = calculate_cost_data(metrics, duration, len(successful_requests), system_config)
     
-    # 2. Request Summary
-    log_request_summary(printer, len(all_requests), len(successful_requests), len(metrics.failed_requests), metrics.peak_concurrent)
+    # 3. Print Professional Report
+    print_professional_report(printer, config, metrics, cost_data, timing_data)
     
-    # 3. Token Analysis
-    log_token_analysis(printer, metrics, len(successful_requests))
-    
-    # 4. Timing Analysis
-    total_inference_time, _ = log_timing_analysis(printer, successful_requests)
-    
-    # 5. Cost Analysis
-    cheapest_name, cheapest_cost, baseline_price = None, 0.0, 0.0
-    actual_system_name, actual_system_cost = None, None
-    baseline_per_req, cheapest_per_req, actual_cost_per_req = 0.0, 0.0, None
-    
-    if successful_requests:
-         result = log_cost_analysis(printer, metrics, duration, len(successful_requests), system_config)
-         if result:
-             cheapest_name, cheapest_cost, baseline_price, actual_system_name, actual_system_cost, baseline_per_req, cheapest_per_req, actual_cost_per_req = result
-
-    # 6. Throughput Summary
-    log_throughput_summary(printer, all_requests, len(successful_requests), metrics)
-    
-    # 7. CSV Export
+    # 4. Export CSV
     export_csv_data(printer, successful_requests, system_config)
-    
-    # 8. Final Summary
-    log_final_summary(printer, len(successful_requests), len(all_requests), metrics, total_inference_time)
-    
-    # 9. Final Verdict
-    if baseline_price > 0:
-        tps = metrics.total_all_tokens / total_inference_time if total_inference_time else 0
-        log_final_verdict(printer, cheapest_name, cheapest_cost, baseline_price, tps, actual_system_name, actual_system_cost, baseline_per_req, cheapest_per_req, actual_cost_per_req)
+
     
 
 # Optional: Real-time progress updates
