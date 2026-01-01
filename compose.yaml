@@ -15,7 +15,7 @@ services:
       start_period: 60s # Give it time to load the model
 
     # === MODE A: CPU ONLY (DEFAULT) ===
-    image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
+    # image: ghcr.io/ggml-org/llama.cpp:server # ARM64 supported, all libs included
     # build:
     #   context: .
     #   dockerfile: Dockerfile.server
@@ -27,14 +27,14 @@ services:
     # ==================================
 
     # === MODE B: GPU ENABLED (Uncomment to enable) ===
-    # image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     # =================================================
 
     volumes:
@@ -47,7 +47,7 @@ services:
       - LLAMA_CACHE=/models
 
       # GPU Offloading (Uncomment for GPU Mode)
-      # - LLAMA_ARG_N_GPU_LAYERS=-1
+      - LLAMA_ARG_N_GPU_LAYERS=-1
 
       - LLAMA_ARG_HOST=0.0.0.0
       - LLAMA_ARG_PORT=${LLAMA_ARG_PORT}
